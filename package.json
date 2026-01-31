@@ -1,9 +1,12 @@
 {
+  "name": "slimjan_bank-statement-csv-ui",
+  "version": "1.0.0",
   "type": "module",
+  "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "express": "^5.2.1"
+    "express": "^4.22.1"
   }
 }

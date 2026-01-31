@@ -1,18 +1,13 @@
-import express from "express";
-import cors from "cors";
+import express from 'express';
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 
-app.use(cors());
-app.use(express.json());
-
-// Health check
-app.get("/health", (req, res) => {
-  res.status(200).json({ status: "ok" });
+// Basic route to verify the server is alive
+app.get('/', (req, res) => {
+  res.send('✅ SlimJan UI is running inside the container!');
 });
 
-const PORT = process.env.PORT || 8080;
-
 app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`Server is listening on port ${PORT}`);
 });
