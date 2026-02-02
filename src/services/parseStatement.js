@@ -5,11 +5,10 @@ import { extractCapitecMetadata } from "../parsers/capitec.metadata.js";
 import { extractFnbMetadata } from "../parsers/fnb.metadata.js";
 import { parseCapitecTransactions } from "../parsers/capitec.transactions.js";
 import { parseFnbTransactions } from "../parsers/fnb.transactions.js";
-import { validateLedger } from "../core/validateLedger.js";
+import { validateLedger } from "../core/validateLedger.js"; // This path is now correct!
 
 export async function parseStatement(buffer) {
   const { text } = await pdf(buffer);
-
   const bank = detectBank(text);
 
   let metadata, transactions;

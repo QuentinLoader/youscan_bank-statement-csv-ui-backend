@@ -2,7 +2,6 @@ import { ParseError } from "../errors/ParseError.js";
 
 /**
  * Deterministically validates ledger balance continuity.
- * Returns valid=false if any inconsistencies are found.
  */
 export function validateLedger(transactions) {
   const warnings = [];
@@ -23,9 +22,7 @@ export function validateLedger(transactions) {
 
     if (Math.abs(expected - curr.balance) > 0.01) {
       warnings.push(
-        `Balance mismatch on ${curr.date}: expected ${expected.toFixed(
-          2
-        )}, got ${curr.balance.toFixed(2)}`
+        `Balance mismatch on ${curr.date}: expected ${expected.toFixed(2)}, got ${curr.balance.toFixed(2)}`
       );
     }
   }
