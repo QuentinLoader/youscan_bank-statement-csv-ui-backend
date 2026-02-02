@@ -1,28 +1,37 @@
-import express from "express";
-import { rowsToCsv } from "../utils/csv.js";
-import { validateLedger } from "../core/validateLedger.js";
+import { ParseError } from "../errors/ParseError.js";
 
-const router = express.Router();
+/**
+ * Deterministically validates ledger balance continuity.
+ * Returns valid=false if any inconsistencies are found.
+ */
+export function validateLedger(transactions) {
+  const warnings = [];
 
-router.post("/", express.json(), (req, res) => {
-  const { statement, transactions } = req.body;
-
-  if (!statement || !transactions) {
-    return res.status(400).json({ error: "INVALID_EXPORT_PAYLOAD" });
+  if (!Array.isArray(transactions) || transactions.length === 0) {
+    throw new ParseError("LEDGER_EMPTY", "No transactions to validate");
   }
 
-  // Safety: re-validate ledger
-  const result = validateLedger(transactions, statement);
+  for (let i = 1; i < transactions.length; i++) {
+    const prev = transactions[i - 1];
+    const curr = transactions[i];
 
-  const csv = rowsToCsv(statement, transactions);
+    const expected =
+      prev.balance +
+      (curr.credit || 0) -
+      (curr.debit || 0) -
+      (curr.fee || 0);
 
-  res.setHeader("Content-Type", "text/csv");
-  res.setHeader(
-    "Content-Disposition",
-    `attachment; filename="SlimJan_${statement.bank}_${statement.statement_period.from}_${statement.statement_period.to}.csv"`
-  );
+    if (Math.abs(expected - curr.balance) > 0.01) {
+      warnings.push(
+        `Balance mismatch on ${curr.date}: expected ${expected.toFixed(
+          2
+        )}, got ${curr.balance.toFixed(2)}`
+      );
+    }
+  }
 
-  res.send(csv);
-});
-
-export default router;
+  return {
+    valid: warnings.length === 0,
+    warnings
+  };
+}

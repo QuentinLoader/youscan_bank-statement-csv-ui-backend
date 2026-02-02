@@ -1,9 +1,13 @@
 import { ParseError } from "../errors/ParseError.js";
 
-export function validateLedger(transactions, metadata) {
+/**
+ * Deterministically validates ledger balance continuity.
+ * Returns valid=false if any inconsistencies are found.
+ */
+export function validateLedger(transactions) {
   const warnings = [];
 
-  if (!transactions.length) {
+  if (!Array.isArray(transactions) || transactions.length === 0) {
     throw new ParseError("LEDGER_EMPTY", "No transactions to validate");
   }
 
@@ -13,8 +17,8 @@ export function validateLedger(transactions, metadata) {
 
     const expected =
       prev.balance +
-      curr.credit -
-      curr.debit -
+      (curr.credit || 0) -
+      (curr.debit || 0) -
       (curr.fee || 0);
 
     if (Math.abs(expected - curr.balance) > 0.01) {
@@ -27,7 +31,7 @@ export function validateLedger(transactions, metadata) {
   }
 
   return {
-    valid: true,
+    valid: warnings.length === 0,
     warnings
   };
 }
