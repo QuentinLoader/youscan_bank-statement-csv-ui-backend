@@ -1,35 +1,24 @@
-import pdf from "pdf-parse";
-import { detectBank } from "../core/detectBank.js";
-import { extractTransactionSection } from "../core/extractTransactionSection.js";
-import { extractCapitecMetadata } from "../parsers/capitec.metadata.js";
-import { extractFnbMetadata } from "../parsers/fnb.metadata.js";
-import { parseCapitecTransactions } from "../parsers/capitec_transactions.js";
-import { parseFnbTransactions } from "../parsers/fnb_transactions.js";
-import { validateLedger } from "../core/validateLedger.js"; // This path is now correct!
+import pdf from 'pdf-parse';
+// Make sure this path matches your folder structure exactly!
+import { parseCapitec } from '../parsers/capitec/capitec_transactions.js'; 
 
-export async function parseStatement(buffer) {
-  const { text } = await pdf(buffer);
-  const bank = detectBank(text);
+export const parseStatement = async (fileBuffer) => {
+  try {
+    const data = await pdf(fileBuffer);
+    const text = data.text;
 
-  let metadata, transactions;
+    // Log the first bit of text to Railway logs for debugging
+    console.log("PDF Text Extracted (first 100 chars):", text.substring(0, 100));
 
-  if (bank === "capitec") {
-    metadata = extractCapitecMetadata(text);
-    const section = extractTransactionSection(text, bank);
-    transactions = parseCapitecTransactions(section);
+    // Currently assuming all uploads are Capitec
+    const transactions = parseCapitec(text);
+
+    return {
+      success: true,
+      transactions: transactions
+    };
+  } catch (error) {
+    console.error("Parser Service Error:", error);
+    throw new Error("Failed to extract text from PDF: " + error.message);
   }
-
-  if (bank === "fnb") {
-    metadata = extractFnbMetadata(text);
-    const section = extractTransactionSection(text, bank);
-    transactions = parseFnbTransactions(section);
-  }
-
-  const ledgerCheck = validateLedger(transactions, metadata);
-
-  return {
-    statement: metadata,
-    transactions,
-    warnings: ledgerCheck.warnings
-  };
-}
+};
