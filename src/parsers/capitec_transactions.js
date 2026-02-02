@@ -1,83 +1,67 @@
 import { ParseError } from "../errors/ParseError.js";
 
-/**
- * Capitec rows look like:
- * Date | Description | Category | Money In | Money Out | Fee | Balance
- */
 export function parseCapitec(textOrLines) {
-  // Ensure we are working with an array of lines
-  const lines = Array.isArray(textOrLines) ? textOrLines : textOrLines.split('\n');
+  const text = Array.isArray(textOrLines) ? textOrLines.join('\n') : textOrLines;
   const rows = [];
+  
+  // 1. This regex finds a Date, then grabs EVERYTHING until it sees the next Date or Balance
+  // It handles descriptions that span multiple lines.
+  const transactionRegex = /(\d{2}\/\d{2}\/\d{4})\s+([\s\S]*?)\s+(-?[\d\s,.]+\.\d{2})\s+(-?[\d\s,.]+\.\d{2})?\s*(-?[\d\s,.]+\.\d{2})?\s+(-?[\d\s,.]+\.\d{2})/g;
 
-  for (const line of lines) {
-    const trimmedLine = line.trim();
-    
-    // Skip empty lines or header repeats
-    if (!trimmedLine || /^Date\s+Description/i.test(trimmedLine)) continue;
-
-    // Normalize spacing (turns multiple spaces into one)
-    const clean = trimmedLine.replace(/\s+/g, " ");
-
-    /**
-     * Regex breakdown:
-     * 1. (\d{2}\/\d{2}\/\d{4}) -> Date (DD/MM/YYYY)
-     * 2. (.*?) -> Description (lazy match)
-     * 3. The following groups handle the columns for Money In/Out/Fee/Balance
-     */
-    const match = clean.match(
-      /^(\d{2}\/\d{2}\/\d{4})\s+(.*?)\s+(-?\d[\d\s,.]*)?\s*(-?\d[\d\s,.]*)?\s*(-?\d[\d\s,.]*)?\s+(-?\d[\d\s,.]*)$/
-    );
-
-    if (!match) {
-      // Instead of crashing the whole app, we log the skipped line
-      console.warn(`Skipping line (no match): ${trimmedLine}`);
-      continue; 
-    }
-
+  let match;
+  while ((match = transactionRegex.exec(text)) !== null) {
     const [
-      ,
-      date,
-      description,
-      val1,
-      val2,
-      val3,
+      , 
+      date, 
+      rawDescription, 
+      val1, 
+      val2, 
+      val3, 
       balanceRaw
     ] = match;
 
-    // Capitec columns vary; we parse what we find
+    // Clean up description (remove extra newlines and spaces)
+    const description = rawDescription.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
+
+    // Logic to determine which value is the transaction amount vs the fee
     const amount1 = parseAmount(val1);
     const amount2 = parseAmount(val2);
     const amount3 = parseAmount(val3);
     const balance = parseAmount(balanceRaw);
 
-    // Basic logic to assign credit/debit based on common Capitec layouts
-    // Usually: Money In is positive, Money Out is negative
+    // In your logs, Capitec often puts Amount, Fee, then Balance.
+    // If val2 exists, it's likely the fee and val1 is the amount.
+    let finalAmount = amount1;
+    if (amount2 !== 0 && amount3 !== 0) {
+        // If three numbers exist before balance, it's Amount, Fee, Balance
+        finalAmount = amount1; 
+    }
+
     rows.push({
       date: toISO(date),
-      description: description.trim(),
-      amount: amount1 !== 0 ? amount1 : amount2, // Simplified for the UI table
+      description: description,
+      amount: finalAmount,
       balance: balance
     });
   }
 
   if (rows.length === 0) {
-    throw new ParseError("CAPITEC_NO_TRANSACTIONS", "No Capitec transactions parsed. Check PDF format.");
+    console.error("No transactions matched the Master Regex. Check RAW text format.");
+    throw new ParseError("CAPITEC_NO_TRANSACTIONS", "Could not extract transactions from PDF layout.");
   }
 
   return rows;
 }
 
 /* --- Helpers --- */
-
-export function toISO(date) {
-  if (!date.includes('/')) return date;
+function toISO(date) {
   const [dd, mm, yyyy] = date.split("/");
   return `${yyyy}-${mm}-${dd}`;
 }
 
-export function parseAmount(val) {
-  if (!val || val.trim() === "") return 0;
-  // Remove spaces (Capitec uses them as thousands separators) and non-numeric chars
-  const sanitized = val.replace(/\s/g, "").replace(/[^-0.9.]/g, "");
+function parseAmount(val) {
+  if (!val) return 0;
+  // Remove spaces (thousands separator) and keep numbers, dots, and minus signs
+  const sanitized = val.replace(/\s/g, "").replace(/[^0-9.-]/g, "");
   return parseFloat(sanitized) || 0;
 }
