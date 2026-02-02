@@ -5,26 +5,17 @@ import { parseStatement } from "./services/parseStatement.js";
 
 const app = express();
 
-// 1. ROBUST CORS SETUP
-const allowedOrigins = [
-  "http://localhost:5173",
-  "https://slimjan-bank-statement-csv-ui.vercel.app",
-  "https://bank-statement-csv-frontend.vercel.app"
-];
-
+// 1. IMPROVED CORS - Allows all your Vercel preview links
 app.use(cors({
   origin: function (origin, callback) {
-    // 1. Allow mobile apps/curl (no origin)
     if (!origin) return callback(null, true);
     
-    // 2. Check if it's in our list
-    if (allowedOrigins.indexOf(origin) !== -1) {
+    // This allows localhost OR any URL that ends with .vercel.app
+    if (origin.startsWith("http://localhost") || origin.endsWith(".vercel.app")) {
       return callback(null, true);
     } else {
-      // 3. LOG THE ACTUAL ORIGIN so you can see it in Railway!
-      console.log("⚠️ CORS Warning: Request from unknown origin:", origin);
-      // For now, allow it so the app works, but log it so we can fix the list later
-      return callback(null, true); 
+      console.log("⚠️ Blocked Origin:", origin);
+      return callback(new Error("CORS Not Allowed"), false);
     }
   },
   methods: ['GET', 'POST', 'OPTIONS'],
@@ -32,33 +23,32 @@ app.use(cors({
   credentials: true
 }));
 
-// Handle Preflight
 app.options('*', cors()); 
-
 app.use(express.json());
+
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Health Checks
 app.get("/", (req, res) => res.send("SlimJan Backend is Online"));
-app.get("/health", (req, res) => res.json({ status: "UP" }));
 
-// Main Route
 app.post("/parse", upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
     
-    console.log(`✅ Received: ${req.file.originalname}`);
+    console.log(`✅ Processing: ${req.file.originalname}`);
     const transactions = await parseStatement(req.file.buffer);
-    res.json(transactions);
+
+    // FIX: Ensure we always return an array, even if empty
+    const safeTransactions = transactions || [];
+    
+    console.log(`🚀 Sending ${safeTransactions.length} transactions back to frontend`);
+    res.json(safeTransactions);
   } catch (error) {
-    console.error("❌ Parsing Error:", error.message);
-    res.status(500).json({ error: "PARSE_FAILED", details: error.message });
+    console.error("❌ Parser Crash:", error.message);
+    res.status(500).json([]); // Send empty array so frontend doesn't crash on .length
   }
 });
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🚀 Engine running on port ${PORT}`);
 });
-
-export default app;
