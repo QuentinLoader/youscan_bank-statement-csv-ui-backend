@@ -1,67 +1,51 @@
-import { ParseError } from "../errors/ParseError.js";
+export function parseCapitec(text) {
+    const transactions = [];
+    // This regex looks for: Date (DD/MM/YYYY) followed by text and then a Currency Amount
+    // It is designed to handle the "stacked" text seen in your logs.
+    const rowRegex = /(\d{2}\/\d{2}\/\d{4})[\s\S]*?([\d\s,.-]+\.\d{2})/g;
+    
+    // Split text into lines to clean up weird PDF spacing
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    
+    let currentDate = null;
 
-export function parseCapitec(textOrLines) {
-  const text = Array.isArray(textOrLines) ? textOrLines.join('\n') : textOrLines;
-  const rows = [];
-  
-  // 1. This regex finds a Date, then grabs EVERYTHING until it sees the next Date or Balance
-  // It handles descriptions that span multiple lines.
-  const transactionRegex = /(\d{2}\/\d{2}\/\d{4})\s+([\s\S]*?)\s+(-?[\d\s,.]+\.\d{2})\s+(-?[\d\s,.]+\.\d{2})?\s*(-?[\d\s,.]+\.\d{2})?\s+(-?[\d\s,.]+\.\d{2})/g;
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
 
-  let match;
-  while ((match = transactionRegex.exec(text)) !== null) {
-    const [
-      , 
-      date, 
-      rawDescription, 
-      val1, 
-      val2, 
-      val3, 
-      balanceRaw
-    ] = match;
+        // 1. Check if the line is a Date
+        const dateMatch = line.match(/^(\d{2}\/\d{2}\/\d{4})$/);
+        if (dateMatch) {
+            currentDate = dateMatch[1];
+            continue;
+        }
 
-    // Clean up description (remove extra newlines and spaces)
-    const description = rawDescription.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
+        // 2. If we have a date, look for the description and amount
+        // Capitec often puts Amount on the line immediately following the description
+        if (currentDate && line.match(/[R-]?[\d\s,]+\.\d{2}/)) {
+            const amount = parseCurrency(line);
+            const description = lines[i - 1] || "Unknown Transaction";
 
-    // Logic to determine which value is the transaction amount vs the fee
-    const amount1 = parseAmount(val1);
-    const amount2 = parseAmount(val2);
-    const amount3 = parseAmount(val3);
-    const balance = parseAmount(balanceRaw);
-
-    // In your logs, Capitec often puts Amount, Fee, then Balance.
-    // If val2 exists, it's likely the fee and val1 is the amount.
-    let finalAmount = amount1;
-    if (amount2 !== 0 && amount3 !== 0) {
-        // If three numbers exist before balance, it's Amount, Fee, Balance
-        finalAmount = amount1; 
+            transactions.push({
+                date: currentDate,
+                description: description,
+                amount: amount,
+                // We'll set balance to 0 if it's not easily found on the same line
+                balance: 0 
+            });
+            
+            // Reset date to prevent accidental duplicates unless another date is found
+            currentDate = null; 
+        }
     }
 
-    rows.push({
-      date: toISO(date),
-      description: description,
-      amount: finalAmount,
-      balance: balance
-    });
-  }
+    if (transactions.length === 0) {
+        throw new Error("CAPITEC_NO_TRANSACTIONS");
+    }
 
-  if (rows.length === 0) {
-    console.error("No transactions matched the Master Regex. Check RAW text format.");
-    throw new ParseError("CAPITEC_NO_TRANSACTIONS", "Could not extract transactions from PDF layout.");
-  }
-
-  return rows;
+    return transactions;
 }
 
-/* --- Helpers --- */
-function toISO(date) {
-  const [dd, mm, yyyy] = date.split("/");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function parseAmount(val) {
-  if (!val) return 0;
-  // Remove spaces (thousands separator) and keep numbers, dots, and minus signs
-  const sanitized = val.replace(/\s/g, "").replace(/[^0-9.-]/g, "");
-  return parseFloat(sanitized) || 0;
+function parseCurrency(val) {
+    // Removes 'R', spaces, and commas, then converts to float
+    return parseFloat(val.replace(/[R\s,]/g, '')) || 0;
 }
