@@ -1,6 +1,7 @@
 import express from 'express';
 import { generateCSV } from '../utils/csvHelper.js';
 
+// Declare it once here
 export const router = express.Router();
 
 router.post('/', (req, res) => {
@@ -21,4 +22,6 @@ router.post('/', (req, res) => {
     console.error('Export Route Error:', error);
     res.status(500).json({ error: 'Failed to generate CSV' });
   }
-});export const router = express.Router(); // This is a "Named Export"
+});
+
+// DO NOT add another "export const router" line down here!
