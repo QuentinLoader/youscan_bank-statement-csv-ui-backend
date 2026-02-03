@@ -1,20 +1,18 @@
 export const parseCapitec = (text) => {
   const transactions = [];
 
-  // 1. ROBUST METADATA SEARCH (Scans entire document, not just a slice)
-  // Look for 10-13 digits following "Account"
-  const accountMatch = text.match(/Account\s*(?:No|Number)?[\s\.:]+(\d{10,13})/i);
-  // Look for a UUID pattern (8-4-4-4-12 hex chars) anywhere in the text
-  const docNoMatch = text.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i);
-  // Look for the Client Name (usually uppercase after the Document No block)
-  const clientMatch = text.match(/Unique Document No[\s\S]*?\n\s*([A-Z\s,]{5,})\n/);
+  // 1. ROBUST METADATA SEARCH (Enhanced for Account Number)
+  // Capitec often labels it as "Account No" or just after the account type (e.g., Global One 1234567890)
+  const accountMatch = text.match(/(?:Account\s*No|Number|Account)[:\s]+(\d{10,13})/i);
+  
+  // Looking specifically for the UUID at the end of the "Unique Document No" string
+  const docNoMatch = text.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i) || 
+                     text.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4})/i); // Fallback for shorter snippets
 
-  const account = accountMatch ? accountMatch[1] : "Check PDF Header";
+  const account = accountMatch ? accountMatch[1] : "Check Header Area";
   const uniqueDocNo = docNoMatch ? docNoMatch[0] : "Check PDF Footer";
-  const clientName = clientMatch ? clientMatch[1].trim() : "Client Name Not Found";
 
-  // 2. TRANSACTION CHUNKING (The solution to line wrapping)
-  // We split the text by dates (DD/MM/YYYY). Everything between two dates is ONE transaction.
+  // 2. CHUNKING BY DATE
   const chunks = text.split(/(?=\d{2}\/\d{2}\/\d{4})/);
   const amountRegex = /-?R?\s*\d+[\d\s,]*\.\d{2}/g;
 
@@ -22,47 +20,45 @@ export const parseCapitec = (text) => {
     const lines = chunk.split('\n').map(l => l.trim()).filter(l => l);
     if (lines.length === 0) return;
 
-    // The first line of a chunk MUST have the date
     const dateMatch = lines[0].match(/(\d{2}\/\d{2}\/\d{4})/);
     if (!dateMatch) return;
 
     const date = dateMatch[0];
-    
-    // Join all text in this chunk (this captures the wrapped descriptions)
     let fullContent = lines.join(' ');
     
-    // Find all currency values in this chunk
+    // GHOST FILTER: Ignore chunks that belong to summary sections
+    const ghostWords = ["summary", "total", "brought forward", "opening balance", "closing balance", "notes"];
+    if (ghostWords.some(word => fullContent.toLowerCase().includes(word))) return;
+
     const rawAmounts = fullContent.match(amountRegex) || [];
 
+    // Transactions must have an amount AND a running balance
     if (rawAmounts.length >= 2) {
       const cleanAmounts = rawAmounts.map(a => parseFloat(a.replace(/[R\s,]/g, '')));
       
       let amount = cleanAmounts[0];
       const balance = cleanAmounts[cleanAmounts.length - 1];
 
-      // If 3 amounts exist, middle is the Fee. We add it to the outflow.
+      // Handle the 3rd column (Fees)
       if (cleanAmounts.length === 3) {
         amount = amount + cleanAmounts[1];
       }
 
-      // Description is everything between the date and the first amount
       let description = fullContent.split(date)[1].split(rawAmounts[0])[0].trim();
       
-      // Clean up common "Junk" words at the end of merged descriptions
+      // Remove noise
       const noise = ["Groceries", "Transfer", "Fees", "Digital", "Internet", "Holiday", "Vehicle", "Restaurants", "Alcohol", "Other Income", "Cash Withdrawal", "Digital Payments"];
       noise.forEach(word => {
         if (description.endsWith(word)) description = description.slice(0, -word.length).trim();
       });
 
-      // Avoid summary rows
-      if (!description.toLowerCase().includes('balance') && !description.toLowerCase().includes('brought forward')) {
+      if (description.length > 2) {
         transactions.push({
           date,
-          description: description || "Transaction",
+          description,
           amount,
           balance,
           account,
-          clientName,
           uniqueDocNo,
           approved: true
         });
@@ -70,6 +66,5 @@ export const parseCapitec = (text) => {
     }
   });
 
-  // Filter for the specific financial years
   return transactions.filter(t => t.date.includes("/2025") || t.date.includes("/2026"));
 };
