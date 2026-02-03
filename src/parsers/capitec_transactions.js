@@ -2,54 +2,56 @@ export const parseCapitec = (text) => {
   const transactions = [];
   const lines = text.split(/\r?\n/);
 
-  // 1. IMPROVED METADATA EXTRACTION (Top of Document)
+  // 1. EXTRACT METADATA (Account, Client, and Unique Doc No)
   const headerArea = text.slice(0, 5000);
-  const accountNumberMatch = headerArea.match(/Account No[:\s]+(\d{10,})/i);
-  // Capitec Client Name is usually between the Document No and the Address
+  
+  const accountNumberMatch = headerArea.match(/Account (?:No|Number)[:\s.]+([0-9\s]{10,})/i);
   const clientNameMatch = headerArea.match(/Unique Document No[\s\S]*?\n\s*([A-Z\s,]{5,})\n/);
   
-  const accountNumber = accountNumberMatch ? accountNumberMatch[1] : "Not Found";
+  // NEW: Extracts the UUID (e.g., 9f49f35a-31e8-44ef-b5aa-b0bffaa498c5)
+  const docNoMatch = headerArea.match(/Unique Document No\s*[\.:]+\s*([a-f0-9\-]{20,})/i);
+  
+  const accountNumber = accountNumberMatch ? accountNumberMatch[1].replace(/\s/g, '') : "Not Found";
   const clientName = clientNameMatch ? clientNameMatch[1].trim() : "Not Found";
+  const uniqueDocNo = docNoMatch ? docNoMatch[1] : "Not Found";
 
   const dateRegex = /(\d{2}\/\d{2}\/\d{4})/;
-  const amountRegex = /-?\d+[\d\s,]*\.\d{2}/g;
-
-  // Header/Footer phrases to ignore while scanning
-  const blacklist = ["Page of", "Balance", "Date Description", "Unique Document No", "24hr Client Care"];
+  const amountRegex = /-?R?\s*\d+[\d\s,]*\.\d{2}/g;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
-    if (!line || blacklist.some(phrase => line.includes(phrase))) continue;
+    if (!line || line.includes("Page of") || line.includes("09/07/2022")) continue;
 
     const dateMatch = line.match(dateRegex);
 
     if (dateMatch) {
       const date = dateMatch[0];
+      if (line.includes("Date Description")) continue;
+
       let content = line.split(date)[1].trim();
       
-      // MULTI-LINE RECOVERY: Scan up to 2 lines ahead for descriptions like "Milnerton Za"
-      let lookAheadIndex = i + 1;
-      while (lines[lookAheadIndex] && 
-             !lines[lookAheadIndex].match(dateRegex) && 
-             !lines[lookAheadIndex].match(amountRegex) &&
-             lines[lookAheadIndex].trim().length > 1) {
-        
-        const nextLine = lines[lookAheadIndex].trim();
-        if (!blacklist.some(phrase => nextLine.includes(phrase))) {
-          content += " " + nextLine;
-          i = lookAheadIndex; // Move main loop counter forward
-        }
-        lookAheadIndex++;
+      // Multi-line description recovery
+      let lookAhead = i + 1;
+      while (lines[lookAhead] && !lines[lookAhead].match(dateRegex) && !lines[lookAhead].match(amountRegex)) {
+        content += " " + lines[lookAhead].trim();
+        i = lookAhead;
+        lookAhead++;
       }
 
-      const amounts = content.match(amountRegex);
-      if (amounts && amounts.length > 0) {
-        const amount = parseFloat(amounts[0].replace(/\s|,/g, ''));
-        const balance = parseFloat(amounts[amounts.length - 1].replace(/\s|,/g, ''));
-        
-        let description = content.split(amounts[0])[0].trim();
-        // Clean up merged column headers
-        description = description.replace(/(Groceries|Transfer|Fees|Digital|Internet|Holiday|Vehicle|Restaurants|Alcohol|Other Income)$/, "").trim();
+      const rawAmounts = content.match(amountRegex) || [];
+
+      if (rawAmounts.length >= 2) {
+        const cleanAmounts = rawAmounts.map(a => parseFloat(a.replace(/[R\s,]/g, '')));
+        let amount = cleanAmounts[0];
+        const balance = cleanAmounts[cleanAmounts.length - 1];
+
+        // Combine Fee into the total amount for accounting accuracy
+        if (cleanAmounts.length === 3) {
+          amount = amount + cleanAmounts[1]; 
+        }
+
+        let description = content.split(rawAmounts[0])[0].trim();
+        description = description.replace(/(Groceries|Transfer|Fees|Digital|Internet|Holiday|Vehicle|Restaurants|Alcohol|Other Income|Cash Withdrawal|Digital Payments)$/, "").trim();
 
         transactions.push({
           date,
@@ -58,12 +60,12 @@ export const parseCapitec = (text) => {
           balance,
           accountNumber,
           clientName,
+          uniqueDocNo, // Added to the data object
           approved: true
         });
       }
     }
   }
 
-  // Ensure sorting by date to help the Balance calculation in UI
   return transactions.filter(t => t.date.includes("/2025") || t.date.includes("/2026"));
 };
