@@ -2,17 +2,19 @@ export const parseCapitec = (text) => {
   const transactions = [];
   const lines = text.split(/\r?\n/);
 
-  // 1. EXTRACT METADATA (Account, Client, and Unique Doc No)
+  // 1. EXTRACT METADATA
   const headerArea = text.slice(0, 5000);
   
+  // Find Account Number
   const accountNumberMatch = headerArea.match(/Account (?:No|Number)[:\s.]+([0-9\s]{10,})/i);
-  const clientNameMatch = headerArea.match(/Unique Document No[\s\S]*?\n\s*([A-Z\s,]{5,})\n/);
-  
-  // NEW: Extracts the UUID (e.g., 9f49f35a-31e8-44ef-b5aa-b0bffaa498c5)
-  const docNoMatch = headerArea.match(/Unique Document No\s*[\.:]+\s*([a-f0-9\-]{20,})/i);
-  
   const accountNumber = accountNumberMatch ? accountNumberMatch[1].replace(/\s/g, '') : "Not Found";
+  
+  // Find Client Name
+  const clientNameMatch = headerArea.match(/Unique Document No[\s\S]*?\n\s*([A-Z\s,]{5,})\n/);
   const clientName = clientNameMatch ? clientNameMatch[1].trim() : "Not Found";
+
+  // Find Unique Document No
+  const docNoMatch = headerArea.match(/Unique Document No\s*[\.:]+\s*([a-f0-9\-]{20,})/i);
   const uniqueDocNo = docNoMatch ? docNoMatch[1] : "Not Found";
 
   const dateRegex = /(\d{2}\/\d{2}\/\d{4})/;
@@ -45,7 +47,6 @@ export const parseCapitec = (text) => {
         let amount = cleanAmounts[0];
         const balance = cleanAmounts[cleanAmounts.length - 1];
 
-        // Combine Fee into the total amount for accounting accuracy
         if (cleanAmounts.length === 3) {
           amount = amount + cleanAmounts[1]; 
         }
@@ -58,9 +59,9 @@ export const parseCapitec = (text) => {
           description,
           amount,
           balance,
-          accountNumber,
+          account: accountNumber, // Replaced 'accountNumber' with 'account'
           clientName,
-          uniqueDocNo, // Added to the data object
+          uniqueDocNo,
           approved: true
         });
       }
