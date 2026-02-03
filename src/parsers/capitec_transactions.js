@@ -46,7 +46,7 @@ export const parseCapitec = (text) => {
 
       let description = fullContent.split(date)[1].split(rawAmounts[0])[0].trim();
       
-      // Remove noise
+      // Remove noise // Remove 
       const noise = ["Groceries", "Transfer", "Fees", "Digital", "Internet", "Holiday", "Vehicle", "Restaurants", "Alcohol", "Other Income", "Cash Withdrawal", "Digital Payments"];
       noise.forEach(word => {
         if (description.endsWith(word)) description = description.slice(0, -word.length).trim();
