@@ -1,80 +1,86 @@
 export const parseCapitec = (text) => {
   const transactions = [];
-  const lines = text.split(/\r?\n/);
+  
+  // 1. EXTRACT METADATA (Account # and Client Name)
+  const accountNumberMatch = text.match(/Account No[:\s]+(\d{10,})/i);
+  const clientNameMatch = text.match(/Unique Document No[\s\S]*?\n([A-Z\s]{5,})\n/);
+  
+  const accountNumber = accountNumberMatch ? accountNumberMatch[1] : "Unknown";
+  const clientName = clientNameMatch ? clientNameMatch[1].trim() : "Client Name Not Found";
 
-  // Regex for Date (DD/MM/YYYY)
+  // 2. DEFINE BOUNDARIES - Stop before the summary tables
+  const startMarker = "Transaction History";
+  const stopMarkers = ["Spending Summary", "Card Subscriptions", "Notes"];
+  
+  let validSection = text;
+  if (text.includes(startMarker)) {
+    validSection = text.split(startMarker)[1];
+  }
+  
+  // Cut off everything after the first stop marker found
+  for (const marker of stopMarkers) {
+    if (validSection.includes(marker)) {
+      validSection = validSection.split(marker)[0];
+      break; 
+    }
+  }
+
+  const lines = validSection.split(/\r?\n/);
   const dateRegex = /^(\d{2}\/\d{2}\/\d{4})/; 
-  // Regex for Amount (captures all currency-like numbers in a line)
   const amountRegex = /-?\d+[\d\s,]*\.\d{2}/g;
-
-  // Header/Footer phrases to skip
-  const blacklist = [
-    "Unique Document No",
-    "Capitec Bank is an authorised",
-    "ClientCare@capitecbank",
-    "Date Description Category",
-    "Page of",
-    "24hr Client Care Centre",
-    "Transaction History"
-  ];
 
   let pendingTx = null;
 
   for (let line of lines) {
     const trimmed = line.trim();
-    if (!trimmed || blacklist.some(phrase => trimmed.includes(phrase))) continue;
+    if (!trimmed || trimmed.includes("Page of") || trimmed.includes("Balance")) continue;
 
     const dateMatch = trimmed.match(dateRegex);
 
     if (dateMatch) {
-      // Save completed transaction before starting next one
       if (pendingTx && pendingTx.amount !== null) transactions.push(pendingTx);
 
       const date = dateMatch[0];
       let content = trimmed.slice(date.length).trim();
-      
       const amounts = content.match(amountRegex);
+      
       let amount = null;
       let balance = null;
       let description = content;
 
       if (amounts && amounts.length > 0) {
-        // First amount is the transaction
         amount = parseFloat(amounts[0].replace(/\s|,/g, ''));
-        
-        // Last amount in the line is the Balance
-        if (amounts.length >= 2) {
-          balance = parseFloat(amounts[amounts.length - 1].replace(/\s|,/g, ''));
-        }
-        
+        // Balance is always the last currency match
+        balance = parseFloat(amounts[amounts.length - 1].replace(/\s|,/g, ''));
         description = content.split(amounts[0])[0].trim();
       }
 
-      pendingTx = { date, description, amount, balance, approved: true };
+      pendingTx = { 
+        date, 
+        description, 
+        amount, 
+        balance, 
+        accountNumber, 
+        clientName, 
+        approved: true 
+      };
 
     } else if (pendingTx) {
-      // Handle overflow descriptions on subsequent lines
+      // Handle multiline description overflow
       const amounts = trimmed.match(amountRegex);
-      
-      if (amounts && pendingTx.amount === null) {
-        pendingTx.amount = parseFloat(amounts[0].replace(/\s|,/g, ''));
-        if (amounts.length >= 2) {
-          pendingTx.balance = parseFloat(amounts[amounts.length - 1].replace(/\s|,/g, ''));
-        }
-        pendingTx.description += ` ${trimmed.split(amounts[0])[0].trim()}`;
-      } else if (!amounts) {
-        // Just extra text for description
-        const cleanPart = trimmed.split(/\s{2,}/)[0];
-        if (cleanPart.length > 1) pendingTx.description += ` ${cleanPart}`;
+      if (!amounts) {
+        const cleanText = trimmed.split(/\s{2,}/)[0];
+        if (cleanText.length > 1) pendingTx.description += ` ${cleanText}`;
       }
     }
   }
 
   if (pendingTx && pendingTx.amount !== null) transactions.push(pendingTx);
 
-  // Final filter for valid years only
+  // Final Filter: Strictly 2025/2026 and exclude balance rows
   return transactions.filter(t => 
     (t.date.includes("/2025") || t.date.includes("/2026")) &&
+    t.description.length > 2 &&
     !t.description.toLowerCase().includes('balance')
   );
 };
