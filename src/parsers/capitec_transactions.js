@@ -1,18 +1,17 @@
 export const parseCapitec = (text) => {
   const transactions = [];
 
-  // 1. ANCHORED METADATA EXTRACTION
-  // Account: Finds "Account" and takes the very next 10 digits (ignoring the VAT number further right)
-  const accountMatch = text.match(/Account\s+(\d{10})/i);
+  // 1. ANCHORED METADATA (Header Specific)
+  // Look for the name immediately after the document title
+  const clientMatch = text.match(/(?:Main Account Statement|Tax Invoice)\s+([A-Z\s,]{5,25})\s+/i);
   
-  // Client Name: Capitec usually puts the Name right above the "Statement Information" block.
-  // We look for a line of uppercase text that isn't a header.
-  const clientMatch = text.match(/([A-Z\s,]{10,})\n\s*Statement Information/i);
+  // Account: Grabs the 10-digit number immediately following "Account"
+  const accountMatch = text.match(/Account\s+(\d{10})/i);
 
-  // Statement ID: The UUID pattern
+  // Statement ID: UUID pattern
   const docNoMatch = text.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i);
 
-  const account = accountMatch ? accountMatch[1] : "Check Header";
+  const account = accountMatch ? accountMatch[1] : "Check Account Bar";
   const uniqueDocNo = docNoMatch ? docNoMatch[0] : "Check Footer";
   const clientName = clientMatch ? clientMatch[1].trim() : "Name Not Found";
 
@@ -21,51 +20,49 @@ export const parseCapitec = (text) => {
   const amountRegex = /-?R?\s*\d+[\d\s,]*\.\d{2}/g;
 
   chunks.forEach(chunk => {
-    const lines = chunk.split('\n').map(l => l.trim()).filter(l => l);
-    if (lines.length === 0) return;
+    // Clean up all newlines within the chunk to fix CSV formatting
+    const cleanChunk = chunk.replace(/\r?\n|\r/g, " ").trim();
+    if (!cleanChunk) return;
 
-    const dateMatch = lines[0].match(/(\d{2}\/\d{2}\/\d{4})/);
+    const dateMatch = cleanChunk.match(/(\d{2}\/\d{2}\/\d{4})/);
     if (!dateMatch) return;
 
     const date = dateMatch[0];
-    let fullContent = lines.join(' ');
     
-    // THE GHOST FILTER: Ignore summary lines
-    const summaryLabels = ["summary", "total", "brought forward", "closing balance", "page of"];
-    if (summaryLabels.some(label => fullContent.toLowerCase().includes(label))) return;
+    // GHOST FILTER: Block summary and header artifacts
+    const summaryLabels = ["summary", "total", "brought forward", "closing balance", "tax invoice", "page of"];
+    if (summaryLabels.some(label => cleanChunk.toLowerCase().includes(label))) return;
 
-    const rawAmounts = fullContent.match(amountRegex) || [];
+    const rawAmounts = cleanChunk.match(amountRegex) || [];
 
-    // Valid transactions need an Amount and a Balance column
     if (rawAmounts.length >= 2) {
       const cleanAmounts = rawAmounts.map(a => parseFloat(a.replace(/[R\s,]/g, '')));
       
       let amount = cleanAmounts[0];
       const balance = cleanAmounts[cleanAmounts.length - 1];
 
-      // Add Fees into the amount if 3 values exist
+      // Handle the Fee column
       if (cleanAmounts.length === 3) {
         amount = amount + cleanAmounts[1];
       }
 
-      // 3. CLEAN DESCRIPTION (Stripping Category Labels)
-      let description = fullContent.split(date)[1].split(rawAmounts[0])[0].trim();
+      // 3. CLEAN DESCRIPTION
+      let description = cleanChunk.split(date)[1].split(rawAmounts[0])[0].trim();
       
+      // Strip trailing category garbage
       const categories = ["Fees", "Transfer", "Other Income", "Internet", "Groceries", "Digital Payments", "Digital Subscriptions", "Online Store"];
       categories.forEach(cat => {
-        if (description.endsWith(cat)) {
-          description = description.slice(0, -cat.length).trim();
-        }
+        if (description.endsWith(cat)) description = description.slice(0, -cat.length).trim();
       });
 
       if (description.length > 1) {
         transactions.push({
           date,
-          description,
+          description: description.replace(/"/g, '""'), // Escape quotes for CSV safety
           amount,
           balance,
           account,
-          clientName,
+          clientName: clientName.replace(/"/g, '""'),
           uniqueDocNo,
           approved: true
         });
