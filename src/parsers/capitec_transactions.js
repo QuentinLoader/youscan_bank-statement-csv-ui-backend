@@ -2,7 +2,7 @@ export const parseCapitec = (text) => {
   const transactions = [];
   const lines = text.split(/\r?\n/);
 
-  // 1. EXTRACT METADATA (Account & Client)
+  // 1. EXTRACT METADATA (Account & Client))
   const headerArea = text.slice(0, 3000);
   const accountNumberMatch = headerArea.match(/Account No[:\s]+(\d{10,})/i);
   const clientNameMatch = headerArea.match(/Unique Document No[\s\S]*?\n([A-Z\s]{5,})\n/);
