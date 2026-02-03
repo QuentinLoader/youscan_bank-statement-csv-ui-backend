@@ -1,72 +1,75 @@
 export const parseCapitec = (text) => {
   const transactions = [];
-  const lines = text.split(/\r?\n/);
 
-  // 1. EXTRACT METADATA
-  const headerArea = text.slice(0, 5000);
-  
-  // Find Account Number
-  const accountNumberMatch = headerArea.match(/Account (?:No|Number)[:\s.]+([0-9\s]{10,})/i);
-  const accountNumber = accountNumberMatch ? accountNumberMatch[1].replace(/\s/g, '') : "Not Found";
-  
-  // Find Client Name
-  const clientNameMatch = headerArea.match(/Unique Document No[\s\S]*?\n\s*([A-Z\s,]{5,})\n/);
-  const clientName = clientNameMatch ? clientNameMatch[1].trim() : "Not Found";
+  // 1. ROBUST METADATA SEARCH (Scans entire document, not just a slice)
+  // Look for 10-13 digits following "Account"
+  const accountMatch = text.match(/Account\s*(?:No|Number)?[\s\.:]+(\d{10,13})/i);
+  // Look for a UUID pattern (8-4-4-4-12 hex chars) anywhere in the text
+  const docNoMatch = text.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i);
+  // Look for the Client Name (usually uppercase after the Document No block)
+  const clientMatch = text.match(/Unique Document No[\s\S]*?\n\s*([A-Z\s,]{5,})\n/);
 
-  // Find Unique Document No
-  const docNoMatch = headerArea.match(/Unique Document No\s*[\.:]+\s*([a-f0-9\-]{20,})/i);
-  const uniqueDocNo = docNoMatch ? docNoMatch[1] : "Not Found";
+  const account = accountMatch ? accountMatch[1] : "Check PDF Header";
+  const uniqueDocNo = docNoMatch ? docNoMatch[0] : "Check PDF Footer";
+  const clientName = clientMatch ? clientMatch[1].trim() : "Client Name Not Found";
 
-  const dateRegex = /(\d{2}\/\d{2}\/\d{4})/;
+  // 2. TRANSACTION CHUNKING (The solution to line wrapping)
+  // We split the text by dates (DD/MM/YYYY). Everything between two dates is ONE transaction.
+  const chunks = text.split(/(?=\d{2}\/\d{2}\/\d{4})/);
   const amountRegex = /-?R?\s*\d+[\d\s,]*\.\d{2}/g;
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line || line.includes("Page of") || line.includes("09/07/2022")) continue;
+  chunks.forEach(chunk => {
+    const lines = chunk.split('\n').map(l => l.trim()).filter(l => l);
+    if (lines.length === 0) return;
 
-    const dateMatch = line.match(dateRegex);
+    // The first line of a chunk MUST have the date
+    const dateMatch = lines[0].match(/(\d{2}\/\d{2}\/\d{4})/);
+    if (!dateMatch) return;
 
-    if (dateMatch) {
-      const date = dateMatch[0];
-      if (line.includes("Date Description")) continue;
+    const date = dateMatch[0];
+    
+    // Join all text in this chunk (this captures the wrapped descriptions)
+    let fullContent = lines.join(' ');
+    
+    // Find all currency values in this chunk
+    const rawAmounts = fullContent.match(amountRegex) || [];
 
-      let content = line.split(date)[1].trim();
+    if (rawAmounts.length >= 2) {
+      const cleanAmounts = rawAmounts.map(a => parseFloat(a.replace(/[R\s,]/g, '')));
       
-      // Multi-line description recovery
-      let lookAhead = i + 1;
-      while (lines[lookAhead] && !lines[lookAhead].match(dateRegex) && !lines[lookAhead].match(amountRegex)) {
-        content += " " + lines[lookAhead].trim();
-        i = lookAhead;
-        lookAhead++;
+      let amount = cleanAmounts[0];
+      const balance = cleanAmounts[cleanAmounts.length - 1];
+
+      // If 3 amounts exist, middle is the Fee. We add it to the outflow.
+      if (cleanAmounts.length === 3) {
+        amount = amount + cleanAmounts[1];
       }
 
-      const rawAmounts = content.match(amountRegex) || [];
+      // Description is everything between the date and the first amount
+      let description = fullContent.split(date)[1].split(rawAmounts[0])[0].trim();
+      
+      // Clean up common "Junk" words at the end of merged descriptions
+      const noise = ["Groceries", "Transfer", "Fees", "Digital", "Internet", "Holiday", "Vehicle", "Restaurants", "Alcohol", "Other Income", "Cash Withdrawal", "Digital Payments"];
+      noise.forEach(word => {
+        if (description.endsWith(word)) description = description.slice(0, -word.length).trim();
+      });
 
-      if (rawAmounts.length >= 2) {
-        const cleanAmounts = rawAmounts.map(a => parseFloat(a.replace(/[R\s,]/g, '')));
-        let amount = cleanAmounts[0];
-        const balance = cleanAmounts[cleanAmounts.length - 1];
-
-        if (cleanAmounts.length === 3) {
-          amount = amount + cleanAmounts[1]; 
-        }
-
-        let description = content.split(rawAmounts[0])[0].trim();
-        description = description.replace(/(Groceries|Transfer|Fees|Digital|Internet|Holiday|Vehicle|Restaurants|Alcohol|Other Income|Cash Withdrawal|Digital Payments)$/, "").trim();
-
+      // Avoid summary rows
+      if (!description.toLowerCase().includes('balance') && !description.toLowerCase().includes('brought forward')) {
         transactions.push({
           date,
-          description,
+          description: description || "Transaction",
           amount,
           balance,
-          account: accountNumber, // Replaced 'accountNumber' with 'account'
+          account,
           clientName,
           uniqueDocNo,
           approved: true
         });
       }
     }
-  }
+  });
 
+  // Filter for the specific financial years
   return transactions.filter(t => t.date.includes("/2025") || t.date.includes("/2026"));
 };
