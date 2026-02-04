@@ -2,32 +2,32 @@ export const parseFnb = (text) => {
   const transactions = [];
 
   // 1. FLATTEN THE TEXT
-  // Fixes the vertical "staircase" issue by merging everything into one long line.
-  // We use double spaces to prevent distinct words from merging (e.g., "Fee" and "R500").
-  const cleanText = text.replace(/\s+/g, '  ');
+  // This is the CRITICAL fix for the "0 transactions" error.
+  // It turns the vertical "shredded" logs back into horizontal lines.
+  const cleanText = text.replace(/\s+/g, ' ');
 
   // 2. METADATA EXTRACTION
   const accountMatch = cleanText.match(/(?:Account|Rekeningnommer).*?(\d{11})/i);
   const clientMatch = cleanText.match(/MR\s+[A-Z\s]{5,40}(?=\s+(?:VAN|PO BOX|POSBUS|STREET|WEG))/i);
   
-  // Extract Statement Date (e.g., "19 Jan 2026")
+  // Extract Statement Date to determine the year (e.g., "19 Jan 2026")
   const statementDateMatch = cleanText.match(/(\d{1,2})\s(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Mrt|Mei|Okt|Des)\s(20\d{2})/i);
 
   // Fallbacks
-  const account = accountMatch ? accountMatch[1] : "63049357064"; 
+  const account = accountMatch ? accountMatch[1] : "Check CSV"; 
   const clientName = clientMatch ? clientMatch[0].trim() : "MR QUENTIN LOADER";
   const statementYear = statementDateMatch ? parseInt(statementDateMatch[3]) : new Date().getFullYear();
 
   // 3. TRANSACTION REGEX
-  // Matches: Date -> Description -> Amount -> Balance
-  // Update: Now accepts DOT (.) or COMMA (,) as decimal separators to be safe.
-  const transactionRegex = /(\d{1,2}\s(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Mrt|Mei|Okt|Des))\s+(.+?)\s+([\d\s,]+[.,]\d{2})\s+([\d\s,]+[.,]\d{2})(?:[A-Za-z]{0,2})?/gi;
+  // Matches: Date (19 Des) -> Description -> Amount -> Balance -> Code (Kt/Dt/K1)
+  // We use [.,] for decimals to handle both 1.00 and 1,00 format.
+  const transactionRegex = /(\d{1,2}\s(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Mrt|Mei|Okt|Des))\s+(.+?)\s+([\d\s,]+[.,]\d{2})\s+([\d\s,]+[.,]\d{2})\s?([A-Za-z0-9]{0,3})?/gi;
 
   let match;
   while ((match = transactionRegex.exec(cleanText)) !== null) {
-    const [_, rawDate, rawDesc, rawAmount, rawBalance] = match;
+    const [_, rawDate, rawDesc, rawAmount, rawBalance, type] = match;
 
-    // SKIP NOISE
+    // SKIP NOISE: Ignore Summary lines or Header text
     if (rawDesc.toLowerCase().includes("opening balance") || 
         rawDesc.toLowerCase().includes("opening saldo") ||
         rawDesc.toLowerCase().includes("brought forward") ||
@@ -44,37 +44,33 @@ export const parseFnb = (text) => {
     const [day, monthStr] = rawDate.split(" ");
     const month = monthMap[monthStr.toLowerCase()] || "01";
     
-    // Year Logic: Handle roll-over (Dec 2025 in Jan 2026 statement)
+    // Year Logic: If statement is Jan 2026, but trans is Dec, it's Dec 2025.
     let year = statementYear;
     if (statementDateMatch && statementDateMatch[2].toLowerCase() === 'jan' && month === '12') {
       year -= 1;
     }
     const formattedDate = `${day.padStart(2, '0')}/${month}/${year}`;
 
-    // AMOUNT CLEANUP (Universal: Handles 1,234.56 AND 1 234,56)
+    // AMOUNT CLEANUP
     const parseAmount = (val) => {
       let v = val.replace(/\s/g, ''); // Remove spaces
-      // If comma is the last separator (e.g. 123,45), treat it as decimal
-      if (v.includes(',') && !v.includes('.')) { 
-         v = v.replace(',', '.'); 
-      }
-      // Otherwise remove commas (thousands separators)
-      return parseFloat(v.replace(/,/g, ''));
+      if (v.includes(',') && !v.includes('.')) v = v.replace(',', '.'); // Handle comma decimal
+      return parseFloat(v.replace(/,/g, '')); // Remove thousand separators
     };
 
     let amount = parseAmount(rawAmount);
     const balance = parseAmount(rawBalance);
 
     // SIGN DETECTION
+    // FNB: "Dt" = Debit (-). "Kt" or "K1" = Credit (+).
+    // If no code, check description keywords.
     const lowerDesc = rawDesc.toLowerCase();
-    const debitKeywords = [
-      "purchase", "aankope", "fee", "fooi", "payment", "betaling", 
-      "withdrawal", "onttrekking", "debit", "debiet", "tikkie", "airtime", "data", "atm", "pos", "netflix", "uber"
-    ];
+    const debitKeywords = ["purchase", "aankope", "fee", "fooi", "payment", "betaling", "withdrawal", "debit", "debiet"];
 
-    const isDebit = debitKeywords.some(key => lowerDesc.includes(key));
-    if (isDebit && amount > 0) {
-      amount = -amount;
+    if (type === "Dt") {
+       if (amount > 0) amount = -amount;
+    } else if (!type && debitKeywords.some(key => lowerDesc.includes(key)) && amount > 0) {
+       amount = -amount;
     }
 
     transactions.push({
