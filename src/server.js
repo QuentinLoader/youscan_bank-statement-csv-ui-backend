@@ -5,12 +5,12 @@ import { parseStatement } from "./services/parseStatement.js";
 
 const app = express();
 
-// 1. NUCLEAR CORS (Allows everything for development)
+// 1. NUCLEAR CORS (Enhanced for production/dev flexibility)
 app.use(cors({
-  origin: '*', // This allows Lovable, Vercel, and Localhost instantly
+  origin: '*', 
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: false // Note: credentials must be false if origin is '*'
+  credentials: false 
 }));
 
 app.options('*', cors()); 
@@ -21,17 +21,51 @@ const upload = multer({ storage: multer.memoryStorage() });
 // Health Check
 app.get("/", (req, res) => res.send("YouScan Engine: Global Access Active"));
 
-// Main Route
-app.post("/parse", upload.single("file"), async (req, res) => {
+/**
+ * Main Route: Supports both single and multiple file uploads
+ * Instruction: In Lovable, ensure the FormData key is 'files'
+ */
+app.post("/parse", upload.array("files"), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    const files = req.files || (req.file ? [req.file] : []);
+    if (files.length === 0) return res.status(400).json({ error: "No files uploaded" });
     
-    console.log(`✅ YouScan received: ${req.file.originalname}`);
-    const transactions = await parseStatement(req.file.buffer);
-    res.json(transactions || []);
+    let allTransactions = [];
+
+    for (const file of files) {
+      console.log(`✅ YouScan received: ${file.originalname}`);
+      
+      // The parseStatement function should now return { transactions, bankInfo }
+      const result = await parseStatement(file.buffer);
+      
+      // Standardize the response with bank metadata for Lovable UI
+      const transactionsWithMetadata = (result.transactions || []).map(t => ({
+        ...t,
+        bankName: result.bankName,
+        bankLogo: result.bankLogo, // URL or ID for Lovable to show logo
+        fileName: file.originalname
+      }));
+
+      allTransactions = [...allTransactions, ...transactionsWithMetadata];
+      console.log(`📊 Detected Bank: ${result.bankName} (${result.transactions.length} transactions)`);
+    }
+
+    res.json(allTransactions);
   } catch (error) {
     console.error("❌ YouScan Error:", error.message);
-    res.status(500).json([]);
+    res.status(500).json({ error: "Parsing failed", details: error.message });
+  }
+});
+
+/**
+ * Simple Auth Gate (Optional Backend Validation for '007')
+ */
+app.post("/verify-gate", (req, res) => {
+  const { code } = req.body;
+  if (code === "007") {
+    res.json({ success: true, token: "youscan-access-granted" });
+  } else {
+    res.status(401).json({ success: false, message: "Invalid Access Code" });
   }
 });
 
