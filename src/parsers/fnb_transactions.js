@@ -2,33 +2,36 @@ export const parseFnb = (text) => {
   const transactions = [];
 
   // 1. FLATTEN THE TEXT
-  // Merges "shredded" vertical lines into a single text stream
+  // Turn vertical "shredded" text into a single horizontal stream
   const cleanText = text.replace(/\s+/g, ' ');
+
+  // DEBUG LOG: This will show us exactly what the parser sees in the logs
+  console.log("🔍 FNB Flattened Snippet:", cleanText.substring(0, 600));
 
   // 2. METADATA
   const accountMatch = cleanText.match(/(?:Account|Rekeningnommer).*?(\d{11})/i);
   const clientMatch = cleanText.match(/MR\s+[A-Z\s]{5,40}(?=\s+(?:VAN|PO BOX|POSBUS|STREET|WEG))/i);
   
-  // Statement Date (Look for both "19 Jan 2026" and "2026/01/19")
-  const dateTextMatch = cleanText.match(/(\d{1,2})\s(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Mrt|Mei|Okt|Des)\s(20\d{2})/i);
-  const dateNumMatch = cleanText.match(/(20\d{2})[\/\-](\d{2})[\/\-](\d{2})/);
+  // Try to find a statement date to help with year logic
+  // Matches "2025/12/19" OR "19 Jan 2026"
+  const dateMatch = cleanText.match(/(\d{4}[\/\-]\d{2}[\/\-]\d{2})|(\d{1,2}\s(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Mrt|Mei|Okt|Des)\s20\d{2})/i);
 
-  // Fallbacks
   const account = accountMatch ? accountMatch[1] : "63049357064"; 
   const clientName = clientMatch ? clientMatch[0].trim() : "MR QUENTIN LOADER";
   
   let statementYear = new Date().getFullYear();
-  if (dateTextMatch) statementYear = parseInt(dateTextMatch[3]);
-  else if (dateNumMatch) statementYear = parseInt(dateNumMatch[1]);
+  if (dateMatch) {
+     const d = dateMatch[0];
+     if (d.includes('/')) statementYear = parseInt(d.split('/')[0]); // 2025/12/19
+     else statementYear = parseInt(d.split(' ').pop()); // 19 Jan 2026
+  }
 
-  // 3. TRANSACTION REGEX (Updated for Numeric Dates)
-  // Matches:
-  // Group 1: Date (e.g., "19 Jan" OR "2025/12/19" OR "19/12/2025")
-  // Group 2: Description
-  // Group 3: Amount
-  // Group 4: Balance
-  // Group 5: Code (Dt/Kt)
-  const transactionRegex = /((?:\d{2}\s(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Mrt|Mei|Okt|Des))|(?:\d{4}[\/\-]\d{2}[\/\-]\d{2})|(?:\d{2}[\/\-]\d{2}[\/\-]\d{4}))\s+(.+?)\s+([\d\s,]+[.,]\d{2})\s+([\d\s,]+[.,]\d{2})\s?([A-Za-z0-9]{0,3})?/gi;
+  // 3. UNIVERSAL TRANSACTION REGEX
+  // Captures 3 distinct date formats:
+  // 1. YYYY/MM/DD (2025/12/19) - Common in your logs
+  // 2. DD/MM/YYYY (19/12/2025)
+  // 3. DD MMM (19 Dec)
+  const transactionRegex = /((?:\d{4}[\/\-]\d{2}[\/\-]\d{2})|(?:\d{2}[\/\-]\d{2}[\/\-]\d{4})|(?:\d{1,2}\s(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Mrt|Mei|Okt|Des)))\s+(.+?)\s+([\d\s,]+[.,]\d{2})\s+([\d\s,]+[.,]\d{2})\s?([A-Za-z0-9]{0,3})?/gi;
 
   let match;
   while ((match = transactionRegex.exec(cleanText)) !== null) {
@@ -44,28 +47,26 @@ export const parseFnb = (text) => {
     // DATE NORMALIZATION
     let formattedDate = rawDate;
     
-    // Check if it's a text date "19 Jan"
-    if (rawDate.match(/[a-zA-Z]/)) {
+    // Case A: YYYY/MM/DD (2025/12/19) -> Convert to DD/MM/YYYY
+    if (rawDate.match(/^\d{4}[\/\-]/)) {
+        const parts = rawDate.split(/[\/\-]/); // [2025, 12, 19]
+        formattedDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
+    // Case B: DD/MM/YYYY (19/12/2025) -> Ensure slashes
+    else if (rawDate.match(/^\d{2}[\/\-]\d{2}[\/\-]\d{4}/)) {
+        formattedDate = rawDate.replace(/-/g, '/');
+    }
+    // Case C: DD MMM (19 Dec)
+    else {
         const monthMap = { jan:"01", feb:"02", mar:"03", mrt:"03", apr:"04", may:"05", mei:"05", jun:"06", jul:"07", aug:"08", sep:"09", oct:"10", okt:"10", nov:"11", dec:"12", des:"12" };
         const [day, monthStr] = rawDate.split(" ");
         const month = monthMap[monthStr.toLowerCase()] || "01";
         
         let year = statementYear;
-        // Handle Dec 2025 trans in Jan 2026 statement
-        if (dateTextMatch && dateTextMatch[2].toLowerCase() === 'jan' && month === '12') {
-            year -= 1;
-        }
+        // Handle roll-over (Dec transaction in Jan statement)
+        if (dateMatch && dateMatch[0].toLowerCase().includes('jan') && month === '12') year -= 1;
+        
         formattedDate = `${day.padStart(2, '0')}/${month}/${year}`;
-    } 
-    // Check if it's YYYY/MM/DD
-    else if (rawDate.match(/^\d{4}/)) {
-        const parts = rawDate.split(/[\/\-]/);
-        formattedDate = `${parts[2]}/${parts[1]}/${parts[0]}`; // Convert to DD/MM/YYYY
-    }
-    // Check if it's DD/MM/YYYY
-    else if (rawDate.match(/^\d{2}[\/\-]\d{2}[\/\-]\d{4}/)) {
-        // Already mostly correct, just normalize separators
-        formattedDate = rawDate.replace(/-/g, '/');
     }
 
     // AMOUNT CLEANUP
@@ -82,7 +83,6 @@ export const parseFnb = (text) => {
     const lowerDesc = rawDesc.toLowerCase();
     const debitKeywords = ["purchase", "aankope", "fee", "fooi", "payment", "betaling", "withdrawal", "debit", "debiet"];
 
-    // FNB "Dt" means Debit (-).
     if (type === "Dt") {
        if (amount > 0) amount = -amount;
     } else if (!type && debitKeywords.some(key => lowerDesc.includes(key)) && amount > 0) {
