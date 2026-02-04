@@ -1,110 +1,75 @@
-import { ParseError } from "../errors/ParseError.js";
+export const parseFnb = (text) => {
+  const transactions = [];
 
-/**
- * FNB rows usually look like:
- * Date | Description | Amount | Balance
- * Example: 22 Des POS Purchase Lovable 436.11 623.48
- */
-export function parseFnb(textOrLines) {
-  // Standardize input to an array of lines
-  const lines = Array.isArray(textOrLines) ? textOrLines : textOrLines.split('\n');
-  const rows = [];
-  let previousBalance = null;
+  // 1. METADATA EXTRACTION
+  // Client Name: Found at the top left [cite: 73]
+  const clientMatch = text.match(/MR\s+[A-Z\s,]{5,30}/i);
+  
+  // Account Number: Explicitly labeled 
+  const accountMatch = text.match(/Account:\s*(\d{11})/i) || text.match(/Rekeningnommer\s*(\d{11})/i);
+  
+  // Reference Number (Statement ID): [cite: 77]
+  const refMatch = text.match(/Referance Number:\s*([A-Z0-9]{10,15})/i);
 
-  for (const line of lines) {
-    const trimmedLine = line.trim();
+  // Statement Period (to determine the year): [cite: 92]
+  const yearMatch = text.match(/202[4-6]/);
+  const currentYear = yearMatch ? yearMatch[0] : new Date().getFullYear().toString();
 
-    // Skip headers (Datum = Date, Beskrywing = Description in Afrikaans)
-    if (!trimmedLine || /^Datum\s+Beskrywing/i.test(trimmedLine) || /^Date\s+Description/i.test(trimmedLine)) continue;
+  const account = accountMatch ? accountMatch[1] : "Check Header";
+  const uniqueDocNo = refMatch ? refMatch[1] : "Check Header";
+  const clientName = clientMatch ? clientMatch[0].trim() : "Name Not Found";
 
-    // Normalize spacing
-    const clean = trimmedLine.replace(/\s+/g, " ");
+  // 2. TRANSACTION CHUNKING
+  // FNB uses "DD MMM" format (e.g., 19 Des) [cite: 90]
+  const chunks = text.split(/(?=\n\d{2}\s(?:Jan|Feb|Mrt|Apr|Mei|Jun|Jul|Aug|Sep|Okt|Nov|Des|Jan|Mar|May|Oct))/);
+  
+  const amountRegex = /-?\d+[\d\s,]*\.\d{2}/g;
 
-    /**
-     * Regex breakdown:
-     * 1. (\d{1,2}\s+\w+) -> Date (e.g., 22 Des or 22 Dec)
-     * 2. (.*?) -> Description
-     * 3. (-?\d[\d\s,.]*) -> Amount
-     * 4. (-?\d[\d\s,.]*) -> Balance
-     * 5. (?:Kt|Dt)? -> Optional Credit/Debit markers
-     */
-    const match = clean.match(
-      /^(\d{1,2}\s+\w+)\s+(.*?)\s+(-?\d[\d\s,.]*)\s+(-?\d[\d\s,.]*)(?:\s*[KD]t)?$/i
-    );
+  chunks.forEach(chunk => {
+    const cleanChunk = chunk.replace(/\r?\n|\r/g, " ").trim();
+    if (!cleanChunk) return;
 
-    if (!match) {
-      // Log skipped lines for debugging without crashing the whole process
-      if (trimmedLine.length > 5) console.warn(`Skipping FNB line: ${trimmedLine}`);
-      continue;
+    // Match the date and description
+    const dateMatch = cleanChunk.match(/^(\d{2}\s(?:Jan|Feb|Mrt|Apr|Mei|Jun|Jul|Aug|Sep|Okt|Nov|Des|Jan|Mar|May|Oct))/i);
+    if (!dateMatch) return;
+
+    // Convert FNB month to numeric format and add year
+    const monthMap = { "Jan": "01", "Feb": "02", "Mrt": "03", "Mar": "03", "Apr": "04", "Mei": "05", "May": "05", "Jun": "06", "Jul": "07", "Aug": "08", "Sep": "09", "Okt": "10", "Oct": "10", "Nov": "11", "Des": "12" };
+    const [day, monthStr] = dateMatch[1].split(" ");
+    const date = `${day}/${monthMap[monthStr]}/${currentYear}`;
+
+    // Skip summary rows
+    if (cleanChunk.toLowerCase().includes("afsluitingsaldo") || cleanChunk.toLowerCase().includes("openingsaldo")) return;
+
+    const rawAmounts = cleanChunk.match(amountRegex) || [];
+
+    if (rawAmounts.length >= 2) {
+      // FNB amounts often have "Kt" or "Dt" suffixes [cite: 90, 101]
+      const cleanAmounts = rawAmounts.map(a => parseFloat(a.replace(/[\s,]/g, '')));
+      
+      // On FNB, if a row has 3 amounts, the middle is often bank charges [cite: 90]
+      let amount = cleanAmounts[0];
+      const balance = cleanAmounts[cleanAmounts.length - 1];
+
+      // Logic to determine if it's an outflow (Negative)
+      // If it's a debit and doesn't have a 'K' suffix in the raw text, make it negative
+      const isCredit = cleanChunk.includes(`${rawAmounts[0]}K`) || cleanChunk.includes(`${rawAmounts[0]}Kt`);
+      if (!isCredit && amount > 0) amount = -amount;
+
+      let description = cleanChunk.split(dateMatch[1])[1].split(rawAmounts[0])[0].trim();
+
+      transactions.push({
+        date,
+        description: description.replace(/"/g, '""'),
+        amount,
+        balance,
+        account,
+        clientName,
+        uniqueDocNo,
+        approved: true
+      });
     }
+  });
 
-    const [, dateRaw, description, amountRaw, balanceRaw] = match;
-
-    // Clean numeric strings: remove spaces/commas before converting to Number
-    const amount = parseFnbAmount(amountRaw);
-    const balance = parseFnbAmount(balanceRaw);
-
-    let debit = 0;
-    let credit = 0;
-    let fee = null;
-
-    // FNB logic: Calculate movement based on balance shifts if needed
-    if (previousBalance !== null) {
-      const delta = Number((balance - previousBalance).toFixed(2));
-
-      if (delta < 0) debit = Math.abs(delta);
-      if (delta > 0) credit = delta;
-
-      // Identify fees based on description keywords
-      if (/fee|fooi|bankkoste|comm/i.test(description)) {
-        fee = Math.abs(delta);
-        debit = 0; 
-      }
-    } else {
-      // First row fallback: use the amount column directly
-      if (amount < 0) debit = Math.abs(amount);
-      else credit = amount;
-    }
-
-    rows.push({
-      date: parseFnbDate(dateRaw),
-      description: description.trim(),
-      amount: credit > 0 ? credit : -debit, // Standardized for the UI table
-      balance: balance
-    });
-
-    previousBalance = balance;
-  }
-
-  if (rows.length === 0) {
-    throw new ParseError("FNB_NO_TRANSACTIONS", "No FNB transactions could be parsed from this file.");
-  }
-
-  return rows;
-}
-
-/* --- Helpers --- */
-
-export function parseFnbAmount(val) {
-  if (!val) return 0;
-  // Remove spaces and commas, keep dots and minus signs
-  const sanitized = val.replace(/\s/g, "").replace(/,/g, "");
-  return parseFloat(sanitized) || 0;
-}
-
-export function parseFnbDate(value) {
-  try {
-    const [day, month] = value.split(/\s+/);
-    const months = {
-      Jan: "01", Feb: "02", Mar: "03", Apr: "04",
-      May: "05", Jun: "06", Jul: "07", Aug: "08",
-      Sep: "09", Oct: "10", Nov: "11", Dec: "12",
-      Des: "12" // Support Afrikaans statements
-    };
-    
-    const monthNum = months[month.substring(0, 3).charAt(0).toUpperCase() + month.substring(1, 3).toLowerCase()];
-    return `2026-${monthNum || '01'}-${day.padStart(2, "0")}`;
-  } catch (e) {
-    return value; // Fallback to raw string if parsing fails
-  }
-}
+  return transactions;
+};
