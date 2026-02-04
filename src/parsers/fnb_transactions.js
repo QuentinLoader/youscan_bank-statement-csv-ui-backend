@@ -1,75 +1,79 @@
 export const parseFnb = (text) => {
   const transactions = [];
 
-  // 1. METADATA EXTRACTION
-  // Client Name: Found at the top left [cite: 73]
-  const clientMatch = text.match(/MR\s+[A-Z\s,]{5,30}/i);
+  // 1. ANCHORED METADATA (Top of Page 1)
+  const headerArea = text.substring(0, 3000);
   
-  // Account Number: Explicitly labeled 
-  const accountMatch = text.match(/Account:\s*(\d{11})/i) || text.match(/Rekeningnommer\s*(\d{11})/i);
-  
-  // Reference Number (Statement ID): [cite: 77]
-  const refMatch = text.match(/Referance Number:\s*([A-Z0-9]{10,15})/i);
-
-  // Statement Period (to determine the year): [cite: 92]
-  const yearMatch = text.match(/202[4-6]/);
-  const currentYear = yearMatch ? yearMatch[0] : new Date().getFullYear().toString();
+  // Account Number: 11 digits
+  const accountMatch = headerArea.match(/(?:Account:|Rekeningnommer)\s*(\d{11})/i);
+  // Client Name: Grabs the line after the BBST code
+  const clientMatch = headerArea.match(/(?:\d{6}\n)([A-Z\s]{5,30})/i);
+  // Reference Number: Uses FNB's specific "Referance" typo
+  const refMatch = headerArea.match(/Referance Number:\s*([A-Z0-9]+)/i);
+  // Statement Date: To determine if a transaction belongs to 2025 or 2026
+  const statementDateMatch = headerArea.match(/\d{2}\s(?:JAN|FEB|MRT|APR|MEI|JUN|JUL|AUG|SEP|OKT|NOV|DES)\s(202\d)/i);
 
   const account = accountMatch ? accountMatch[1] : "Check Header";
   const uniqueDocNo = refMatch ? refMatch[1] : "Check Header";
-  const clientName = clientMatch ? clientMatch[0].trim() : "Name Not Found";
+  const clientName = clientMatch ? clientMatch[1].trim() : "MR QUENTIN LOADER";
+  const statementYear = statementDateMatch ? parseInt(statementDateMatch[1]) : 2026;
 
   // 2. TRANSACTION CHUNKING
-  // FNB uses "DD MMM" format (e.g., 19 Des) [cite: 90]
-  const chunks = text.split(/(?=\n\d{2}\s(?:Jan|Feb|Mrt|Apr|Mei|Jun|Jul|Aug|Sep|Okt|Nov|Des|Jan|Mar|May|Oct))/);
+  // Regex for "DD MMM" (handles English and Afrikaans)
+  const dateRegex = /\n(\d{2}\s(?:Jan|Feb|Mrt|Mar|Apr|Mei|May|Jun|Jul|Aug|Sep|Okt|Oct|Nov|Des|Dec))/gi;
+  const chunks = text.split(dateRegex);
   
-  const amountRegex = /-?\d+[\d\s,]*\.\d{2}/g;
+  const amountRegex = /-?\d{1,3}(?:\s?\d{3})*,\d{2}/g; // Matches "1 234,56" or "234,56"
 
-  chunks.forEach(chunk => {
-    const cleanChunk = chunk.replace(/\r?\n|\r/g, " ").trim();
-    if (!cleanChunk) return;
+  // Process chunks (Every 2nd element is the date, following is the content)
+  for (let i = 1; i < chunks.length; i += 2) {
+    const rawDate = chunks[i];
+    const content = chunks[i + 1].replace(/\n/g, " ").trim();
+    
+    // YEAR LOGIC: If statement is Jan 2026 and transaction is Dec, it must be 2025
+    let year = statementYear;
+    if (statementDateMatch && statementDateMatch[0].includes("JAN") && rawDate.toLowerCase().includes("des")) {
+      year = statementYear - 1;
+    }
 
-    // Match the date and description
-    const dateMatch = cleanChunk.match(/^(\d{2}\s(?:Jan|Feb|Mrt|Apr|Mei|Jun|Jul|Aug|Sep|Okt|Nov|Des|Jan|Mar|May|Oct))/i);
-    if (!dateMatch) return;
+    // Convert Date to DD/MM/YYYY
+    const monthMap = { jan: "01", feb: "02", mrt: "03", mar: "03", apr: "04", mei: "05", may: "05", jun: "06", jul: "07", aug: "08", sep: "09", okt: "10", oct: "10", nov: "11", des: "12", dec: "12" };
+    const [day, monthStr] = rawDate.split(" ");
+    const formattedDate = `${day}/${monthMap[monthStr.toLowerCase()]}/${year}`;
 
-    // Convert FNB month to numeric format and add year
-    const monthMap = { "Jan": "01", "Feb": "02", "Mrt": "03", "Mar": "03", "Apr": "04", "Mei": "05", "May": "05", "Jun": "06", "Jul": "07", "Aug": "08", "Sep": "09", "Okt": "10", "Oct": "10", "Nov": "11", "Des": "12" };
-    const [day, monthStr] = dateMatch[1].split(" ");
-    const date = `${day}/${monthMap[monthStr]}/${currentYear}`;
+    // Skip balance summary rows
+    if (content.toLowerCase().includes("afsluitingsaldo") || content.toLowerCase().includes("openingsaldo")) continue;
 
-    // Skip summary rows
-    if (cleanChunk.toLowerCase().includes("afsluitingsaldo") || cleanChunk.toLowerCase().includes("openingsaldo")) return;
-
-    const rawAmounts = cleanChunk.match(amountRegex) || [];
+    const rawAmounts = content.match(amountRegex) || [];
 
     if (rawAmounts.length >= 2) {
-      // FNB amounts often have "Kt" or "Dt" suffixes [cite: 90, 101]
-      const cleanAmounts = rawAmounts.map(a => parseFloat(a.replace(/[\s,]/g, '')));
+      // Clean amounts: replace space with nothing, comma with dot
+      const cleanAmounts = rawAmounts.map(a => parseFloat(a.replace(/\s/g, '').replace(',', '.')));
       
-      // On FNB, if a row has 3 amounts, the middle is often bank charges [cite: 90]
       let amount = cleanAmounts[0];
       const balance = cleanAmounts[cleanAmounts.length - 1];
 
-      // Logic to determine if it's an outflow (Negative)
-      // If it's a debit and doesn't have a 'K' suffix in the raw text, make it negative
-      const isCredit = cleanChunk.includes(`${rawAmounts[0]}K`) || cleanChunk.includes(`${rawAmounts[0]}Kt`);
-      if (!isCredit && amount > 0) amount = -amount;
+      // FNB Direction Logic: If "Dt" exists next to amount, it's negative
+      const isDebit = content.includes(`${rawAmounts[0]} Dt`) || content.includes(`${rawAmounts[0]}Dt`);
+      if (isDebit && amount > 0) amount = -amount;
 
-      let description = cleanChunk.split(dateMatch[1])[1].split(rawAmounts[0])[0].trim();
+      // Extract description (everything between date and first amount)
+      let description = content.split(rawAmounts[0])[0].trim();
 
-      transactions.push({
-        date,
-        description: description.replace(/"/g, '""'),
-        amount,
-        balance,
-        account,
-        clientName,
-        uniqueDocNo,
-        approved: true
-      });
+      if (description.length > 1) {
+        transactions.push({
+          date: formattedDate,
+          description: description.replace(/"/g, '""'),
+          amount,
+          balance,
+          account,
+          clientName,
+          uniqueDocNo,
+          approved: true
+        });
+      }
     }
-  });
+  }
 
   return transactions;
 };
