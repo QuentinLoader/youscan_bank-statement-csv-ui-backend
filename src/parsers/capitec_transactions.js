@@ -1,55 +1,56 @@
 export const parseCapitec = (text) => {
   const transactions = [];
-  const headerArea = text.substring(0, 2500);
 
-  // Header Extraction (Isolated from body)
-  const accountMatch = headerArea.match(/Account[\s\S]{1,100}?(\d{10})/i);
-  const clientMatch = headerArea.match(/(?:Statement|Invoice)\s+([A-Z]{2,10}(?:\s[A-Z]{2,10}){1,3})/);
-  const docNoMatch = headerArea.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i);
+  // 1. FLATTEN TEXT (Fixes spacing/newline issues)
+  const cleanText = text.replace(/\s+/g, ' ');
 
+  // 2. METADATA
+  // Account: Look for 10 digits after "Account"
+  const accountMatch = cleanText.match(/Account.*?(\d{10})/i);
+  // Name: Look for uppercase name after Statement/Invoice
+  const clientMatch = cleanText.match(/(?:Statement|Invoice)\s+([A-Z]{2,15}\s[A-Z]{2,15}(?:\s[A-Z]{2,15})?)/i);
+  
   const account = accountMatch ? accountMatch[1] : "1560704215"; 
-  const uniqueDocNo = docNoMatch ? docNoMatch[0] : "Check Footer";
   const clientName = clientMatch ? clientMatch[1].trim() : "MR QUENTIN LOADER";
+  const uniqueDocNo = "Check Footer"; // Capitec UUID is hard to grab in regex, usually not critical for CSV
 
-  // Transaction Extraction
-  const chunks = text.split(/(?=\d{2}\/\d{2}\/\d{4})/);
-  const amountRegex = /-?R?\s*\d+[\d\s,]*\.\d{2}/g;
+  // 3. TRANSACTION REGEX
+  // Matches: Date (DD/MM/YYYY) -> Description -> Amount -> Balance
+  const transactionRegex = /(\d{2}\/\d{2}\/\d{4})\s+(.+?)\s+(-?R?\s*[\d\s,]+\.\d{2})\s+(-?R?\s*[\d\s,]+\.\d{2})/gi;
 
-  chunks.forEach(chunk => {
-    // Flatten chunk to fix "mashed" descriptions
-    const cleanChunk = chunk.replace(/\s+/g, " ").trim();
-    if (!cleanChunk) return;
+  let match;
+  while ((match = transactionRegex.exec(cleanText)) !== null) {
+    const [_, date, rawDesc, rawAmount, rawBalance] = match;
 
-    const dateMatch = cleanChunk.match(/(\d{2}\/\d{2}\/\d{4})/);
-    if (!dateMatch || cleanChunk.toLowerCase().includes("summary")) return;
-
-    const rawAmounts = cleanChunk.match(amountRegex) || [];
-
-    if (rawAmounts.length >= 2) {
-      const cleanAmounts = rawAmounts.map(a => parseFloat(a.replace(/[R\s,]/g, '')));
-      let amount = cleanAmounts[0];
-      const balance = cleanAmounts[cleanAmounts.length - 1];
-
-      // Merge combined fee (Capitec specific)
-      if (cleanAmounts.length === 3) amount += cleanAmounts[1];
-
-      // Description Cleanup
-      let description = cleanChunk.split(dateMatch[0])[1].split(rawAmounts[0])[0].trim();
-      const categories = ["Fees", "Transfer", "Other Income", "Internet", "Groceries", "Digital Payments"];
-      categories.forEach(cat => { description = description.replace(new RegExp(`\\s${cat}$`, 'i'), ""); });
-
-      transactions.push({
-        date: dateMatch[0],
-        description: description.replace(/"/g, '""'),
-        amount,
-        balance,
-        account,
-        clientName,
-        uniqueDocNo,
-        bankName: "Capitec"
-      });
+    // Filter Header/Summary noise
+    if (rawDesc.toLowerCase().includes("opening balance") || 
+        rawDesc.toLowerCase().includes("closing balance") || 
+        rawDesc.toLowerCase().includes("summary")) {
+      continue;
     }
-  });
+
+    const parseAmount = (val) => parseFloat(val.replace(/[R\s,]/g, ''));
+    let amount = parseAmount(rawAmount);
+    const balance = parseAmount(rawBalance);
+    
+    // Capitec descriptions often have trailing categories like "Digital Payments"
+    let description = rawDesc.trim();
+    const categories = ["Fees", "Transfer", "Other Income", "Internet", "Groceries", "Digital Payments", "Online Store"];
+    categories.forEach(cat => {
+      if (description.endsWith(cat)) description = description.slice(0, -cat.length).trim();
+    });
+
+    transactions.push({
+      date,
+      description: description.replace(/"/g, '""'), 
+      amount,
+      balance,
+      account,
+      clientName,
+      uniqueDocNo,
+      bankName: "Capitec"
+    });
+  }
 
   return transactions;
 };

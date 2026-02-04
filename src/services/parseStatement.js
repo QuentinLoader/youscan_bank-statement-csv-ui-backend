@@ -7,61 +7,52 @@ export const parseStatement = async (fileBuffer) => {
     const data = await pdf(fileBuffer);
     const text = data.text;
 
-    // Log the start of the file to verify what we are seeing
-    console.log("PDF Header Snippet:", text.substring(0, 300).replace(/\n/g, ' '));
+    // Flatten text for easier keyword detection
+    const lowerText = text.toLowerCase().replace(/\s+/g, ' ');
+    
+    // DEBUG: Log the first 200 chars to see what the detector sees
+    console.log("🔍 Header Check:", lowerText.substring(0, 200));
 
     let transactions = [];
     let bankName = "Unknown";
     let bankLogo = "generic";
 
-    // --- ROBUST DETECTION LOGIC ---
-    // We flatten the text for detection to avoid newline issues
-    const lowerText = text.toLowerCase().replace(/\s+/g, ' ');
+    // --- STRICT DETECTION LOGIC ---
 
-    // FNB DETECTION (Prioritize FNB unique identifiers)
-    // "bbst" is the branch code identifier often found in FNB headers in your logs
-    // "rekeningnommer" is Afrikaans for Account Number (FNB specific in this context)
-    // "fnb premier" or "first national bank"
+    // 1. CAPITEC (Check first - distinctive keywords)
     if (
-      lowerText.includes("fnb") || 
-      lowerText.includes("first national bank") || 
-      lowerText.includes("bbst") || 
-      lowerText.includes("rekeningnommer") ||
-      lowerText.includes("referance number") 
-    ) {
-      console.log("🏦 Detected Bank: FNB");
-      bankName = "FNB";
-      bankLogo = "fnb";
-      transactions = parseFnb(text);
-    } 
-    // CAPITEC DETECTION
-    // Look for Capitec specific keywords
-    else if (
       lowerText.includes("capitec") || 
-      lowerText.includes("unique document no")
+      lowerText.includes("unique document no") ||
+      lowerText.includes("remote banking")
     ) {
       console.log("🏦 Detected Bank: Capitec");
       bankName = "Capitec";
       bankLogo = "capitec";
       transactions = parseCapitec(text);
     } 
-    // FALLBACK (If we can't tell, check for "Dt" or "Kt" which suggests FNB)
-    else if (lowerText.includes(" dt ") || lowerText.includes(" kt ")) {
-       console.log("🏦 Detected Bank: FNB (Fallback by Dt/Kt)");
-       bankName = "FNB";
-       bankLogo = "fnb";
-       transactions = parseFnb(text);
-    }
+    // 2. FNB (Check second)
+    else if (
+      lowerText.includes("fnb") || 
+      lowerText.includes("first national bank") || 
+      lowerText.includes("bbst") || 
+      lowerText.includes("rekeningnommer")
+    ) {
+      console.log("🏦 Detected Bank: FNB");
+      bankName = "FNB";
+      bankLogo = "fnb";
+      transactions = parseFnb(text);
+    } 
+    // 3. FALLBACK (Default to Capitec if unsure, but warn)
     else {
-      console.warn("⚠️ Bank not recognized. Defaulting to Capitec.");
-      bankName = "Capitec (Default)";
+      console.warn("⚠️ Bank signature not found. Defaulting to Capitec.");
+      bankName = "Capitec";
       bankLogo = "capitec";
       transactions = parseCapitec(text);
     }
 
     const validatedTransactions = Array.isArray(transactions) ? transactions : [];
     
-    console.log(`✅ Success: Processed ${bankName} statement with ${validatedTransactions.length} transactions.`);
+    console.log(`✅ Result: ${bankName} - ${validatedTransactions.length} transactions found.`);
 
     return {
       transactions: validatedTransactions,
@@ -70,11 +61,7 @@ export const parseStatement = async (fileBuffer) => {
     };
 
   } catch (error) {
-    console.error("❌ Critical Service Error:", error.message);
-    return {
-      transactions: [],
-      bankName: "Error",
-      bankLogo: "error"
-    };
+    console.error("❌ Critical Parsing Error:", error.message);
+    return { transactions: [], bankName: "Error", bankLogo: "error" };
   }
 };
