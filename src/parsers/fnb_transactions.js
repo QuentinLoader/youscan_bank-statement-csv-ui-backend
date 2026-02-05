@@ -1,44 +1,63 @@
 export const parseFnb = (text) => {
   const transactions = [];
+
+  // 1. ISOLATE THE TRANSACTION ZONE
+  // We use simple indices to find the core data and ignore the noisy header/footer.
+  const lowerText = text.toLowerCase();
+  let startIdx = lowerText.indexOf("opening balance");
+  if (startIdx === -1) startIdx = lowerText.indexOf("opening saldo");
   
-  // 1. ISOLATE THE TRANSACTION BLOCK
-  // We find the text between "Opening Balance" and "Closing Balance"
-  const startMarker = /Opening Balance\s+[\d\s,.]+(?:Cr|Dr|Dt|Kt)?/i;
-  const endMarker = /Closing Balance/i;
+  let endIdx = lowerText.indexOf("closing balance");
+  if (endIdx === -1) endIdx = lowerText.indexOf("afsluitingsaldo");
+  if (endIdx === -1) endIdx = lowerText.indexOf("turnover for statement");
+
+  const activeZone = text.substring(
+    startIdx !== -1 ? startIdx : 0, 
+    endIdx !== -1 ? endIdx : text.length
+  );
+
+  // Normalize whitespace but preserve order
+  let cleanZone = activeZone.replace(/\s+/g, ' ');
+
+  // 2. METADATA
+  // Targets the clean 11-digit sequence found later in the header
+  const accountMatch = text.match(/(?:Account Number|Gold Business Account|ZFN 0:)\s*:?\s*(\d{11})/i);
+  const account = accountMatch ? accountMatch[1] : "62854836693";
   
-  const startIdx = text.search(startMarker);
-  const endIdx = text.search(endMarker);
+  let statementYear = 2026;
+  const headerDateMatch = text.match(/(\d{4})\/\d{2}\/\d{2}/);
+  if (headerDateMatch) statementYear = parseInt(headerDateMatch[1]);
+
+  // 3. SEQUENTIAL SCANNER
+  // Anchor on any date format found in FNB statements
+  const dateRegex = /(\d{1,2}\s(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Mrt|Mei|Okt|Des)|(?:\d{4}\/\d{2}\/\d{2}))/gi;
   
-  if (startIdx === -1) return []; // No transactions found
-  
-  // Extract only the relevant meat of the statement
-  const transactionBlock = text.substring(startIdx, endIdx !== -1 ? endIdx : text.length);
-  let cleanText = transactionBlock.replace(/\s+/g, ' ');
+  const dateMatches = [];
+  let match;
+  while ((match = dateRegex.exec(cleanZone)) !== null) {
+    dateMatches.push({ dateStr: match[0], index: match.index });
+  }
 
-  // Metadata (Still needed for the CSV/Review)
-  const accountMatch = text.match(/(?:Account Number|Gold Business Account).*?(\d{11})/i);
-  const account = accountMatch ? accountMatch[1] : "62854836693"; 
+  for (let i = 0; i < dateMatches.length; i++) {
+    const current = dateMatches[i];
+    const next = dateMatches[i+1];
+    
+    // LOOK-BACK: Text from the previous transaction to this date
+    const prevEnd = i === 0 ? 0 : dateMatches[i-1].index + dateMatches[i-1].dateStr.length;
+    const lookBackText = cleanZone.substring(prevEnd, current.index).trim();
+    
+    // LOOK-FORWARD: Text from this date to the next date
+    const nextStart = next ? next.index : cleanZone.length;
+    const lookForwardText = cleanZone.substring(current.index + current.dateStr.length, nextStart).trim();
 
-  // 2. BLOCK SPLITTING BY DATE
-  const dateRegex = /(\d{1,2}\s(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Mrt|Mei|Okt|Des))/gi;
-  const parts = cleanText.split(dateRegex);
-
-  let carryOverDescription = "";
-
-  // The first part [0] is usually the Opening Balance text itself, we skip it.
-  for (let i = 1; i < parts.length; i += 2) {
-    const date = parts[i];
-    const content = parts[i + 1];
-
-    // Identify Amount and Balance pairs
-    const moneyRegex = /([\d\s,]+[.,]\d{2}(?:\s?Cr|Dr|Dt|Kt)?)(?!\d)/gi;
-    const amountsFound = content.match(moneyRegex) || [];
+    // Find Amounts and Balances (The last two numbers in this segment)
+    const moneyRegex = /([\d\s,]+[.,]\d{2}\s?(?:Cr|Dr|Dt|Kt)?)(?!\d)/gi;
+    const amountsFound = lookForwardText.match(moneyRegex) || [];
 
     if (amountsFound.length >= 2) {
-      // Logic: Balance is the final number, Amount is the one before it.
       const rawAmount = amountsFound[amountsFound.length - 2];
       const rawBalance = amountsFound[amountsFound.length - 1];
-      
+
       const cleanNum = (val) => {
         let v = val.replace(/[R\s]/gi, '').replace(/(Cr|Dr|Dt|Kt)/gi, '');
         return parseFloat(v.replace(/,/g, ''));
@@ -47,34 +66,39 @@ export const parseFnb = (text) => {
       let amount = cleanNum(rawAmount);
       const balance = cleanNum(rawBalance);
 
-      // 3. THE "SANDWICH" STITCH
-      // Takes text from the previous line (backpack) and adds it to current line
-      let localDesc = content.split(rawAmount)[0].trim();
-      let description = (carryOverDescription + " " + localDesc).trim();
-      
-      // Final Cleanup
+      // Description is text before the date + text before the amount
+      let localDesc = lookForwardText.split(rawAmount)[0].trim();
+      let description = (lookBackText + " " + localDesc).trim();
+
+      // Final scrubbing of indicators and "ghost" numbers
       description = description.replace(/^(Kt|Dt|Dr|Cr)\s+/gi, '');
-      description = description.replace(/^[\d\s\.,]+/, ''); 
+      description = description.replace(/^[\d\s\.,]{3,}/, ''); 
       description = description.replace(/^#/, '').trim();
 
-      // Sign Logic: If it has Cr/Kt, it's Income.
+      // Sign Logic: Explicit Credit indicator means positive
       const isCredit = rawAmount.toUpperCase().includes("CR") || rawAmount.toUpperCase().includes("KT");
       if (!isCredit) amount = -Math.abs(amount);
 
+      // Date Formatting
+      let formattedDate = current.dateStr;
+      if (current.dateStr.includes(' ')) {
+        const [day, monthStr] = current.dateStr.split(" ");
+        const monthMap = { jan:"01", feb:"02", mar:"03", apr:"04", may:"05", jun:"06", jul:"07", aug:"08", sep:"09", oct:"10", nov:"11", dec:"12" };
+        const month = monthMap[monthStr.toLowerCase().substring(0,3)] || "01";
+        formattedDate = `${day.padStart(2, '0')}/${month}/${statementYear}`;
+      } else if (current.dateStr.includes('/')) {
+        const p = current.dateStr.split('/');
+        formattedDate = `${p[2]}/${p[1]}/${p[0]}`;
+      }
+
       transactions.push({
-        date: `${date} 2026`,
+        date: formattedDate,
         description: description || "#Online Payment History",
         amount,
         balance,
         account,
         bankName: "FNB"
       });
-
-      // Update carryOver for next loop (Anything after the balance)
-      carryOverDescription = content.split(rawBalance)[1]?.trim() || "";
-    } else {
-      // If no numbers, this is a floating description for the next date
-      carryOverDescription = (carryOverDescription + " " + content).trim();
     }
   }
 
