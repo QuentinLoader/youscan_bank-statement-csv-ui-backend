@@ -1,19 +1,20 @@
 export const parseFnb = (text) => {
   const transactions = [];
 
-  // 1. DE-MASHING & CLEANUP (Critical for FNB 2)
+  // 1. DE-MASHING ENGINE (Crucial for FNB 2)
   let cleanText = text.replace(/\s+/g, ' ');
-  
-  // Force split CamelCase (e.g. "DesPOS" -> "Des POS")
+
+  // Force split CamelCase (e.g., "DesPOS" -> "Des POS")
   cleanText = cleanText.replace(/([a-z])([A-Z])/g, '$1 $2');
-  
-  // Force split Letters/Numbers (e.g. "19Jan" -> "19 Jan")
+
+  // Force split Letters/Numbers (e.g., "19Jan" -> "19 Jan")
   cleanText = cleanText.replace(/(\d)([a-zA-Z])/g, '$1 $2');
   cleanText = cleanText.replace(/([a-zA-Z])(\d)/g, '$1 $2');
-  
-  // Force split mashed amounts (e.g. "100.00200.00" -> "100.00 200.00")
+
+  // Force split mashed amounts (e.g., "100.00200.00" -> "100.00 200.00")
+  // This solves the "Amount rows contain multiple values" issue
   cleanText = cleanText.replace(/(\.\d{2})(\d)/g, '$1 $2');
-  
+
   // Normalize date delimiters
   cleanText = cleanText.replace(/(\d{4})[\/\-](\d{2})[\/\-](\d{2})/g, " $1/$2/$3 ");
   cleanText = cleanText.replace(/(\d{2})[\/\-](\d{2})[\/\-](\d{4})/g, " $1/$2/$3 ");
@@ -32,11 +33,11 @@ export const parseFnb = (text) => {
   }
 
   // 2. BLOCK SPLITTING STRATEGY
-  // We split the text by Date. This works best for "Stream" layouts.
+  // We split the text by Date. This creates "blocks" of data for each transaction.
   const dateRegex = /((?:\d{4}\/\d{2}\/\d{2})|(?:\d{2}\/\d{2}\/\d{4})|(?:\d{1,2}\s(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Mrt|Mei|Okt|Des)))/gi;
   const parts = cleanText.split(dateRegex);
 
-  // Loop through parts: [Text before Date] -> [Date] -> [Text after Date]
+  // Iterate through parts: [Text before Date] -> [Date] -> [Data Block]
   for (let i = 0; i < parts.length - 1; i++) {
     const potentialDate = parts[i].trim();
     
@@ -44,20 +45,21 @@ export const parseFnb = (text) => {
     if (potentialDate.match(dateRegex) && potentialDate.length < 20) {
         const dataBlock = parts[i+1].trim(); 
         
-        // 3. HEADER GUARD (Fixes "First line is wrong")
-        // Explicitly skip blocks that look like headers or opening balances
+        // 3. HEADER GUARD (Solves "First line is wrong")
+        // We explicitly skip blocks that contain header keywords. 
+        // This removes the "Opening Balance" line from FNB 2.
         const lowerBlock = dataBlock.toLowerCase();
         if (lowerBlock.includes("opening balance") || 
             lowerBlock.includes("brought forward") || 
             lowerBlock.includes("current account") ||
             lowerBlock.includes("rekeningnommer") ||
             lowerBlock.includes("statement period") ||
-            lowerBlock.includes("reference number")) { // specific to FNB 2
+            lowerBlock.includes("reference number")) { 
             i++; continue;
         }
 
         // 4. NUMBER EXTRACTION
-        // Look for money-like numbers.
+        // We look for money-like numbers in the block
         const moneyRegex = /([R\-\s]*[\d\s]+[.,]\d{2})(?!\d)/g;
         const allNumbers = dataBlock.match(moneyRegex);
 
@@ -76,15 +78,15 @@ export const parseFnb = (text) => {
             let amount = cleanNum(rawAmount);
             const balance = cleanNum(rawBalance);
 
-            // 5. ORPHAN SCRUBBER (Fixes "Values in Description")
+            // 5. ORPHAN SCRUBBER (Solves "Values in Description")
             // Description is everything before the Amount.
             let description = dataBlock.split(rawAmount)[0].trim();
 
-            // Broom: Remove stray digits/dots from the START of the description
-            // e.g., "7.50 15.28 Netflix" -> "Netflix"
+            // The Broom: Remove stray digits/dots from the START of the description
+            // e.g. "7.50 15.28 Netflix" -> "Netflix"
             description = description.replace(/^[\d\s\.,]+/, '').trim();
             
-            // Broom: Remove bank codes
+            // Remove bank codes
             description = description.replace(/^(Kt|Dt|Dr|Cr)\s+/, '').trim();
 
             // 6. DATE FORMATTING
@@ -95,7 +97,7 @@ export const parseFnb = (text) => {
                 const monthStr3 = monthStr.toLowerCase().substring(0,3);
                 const month = monthMap[monthStr3] || "01";
                 
-                // Rollback Year Logic (Dec trans in Jan statement)
+                // Rollback Year Logic
                 const stmtYear = statementDate.getFullYear();
                 const stmtMonth = statementDate.getMonth() + 1;
                 const transMonthInt = parseInt(month);
