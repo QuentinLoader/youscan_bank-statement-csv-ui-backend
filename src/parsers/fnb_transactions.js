@@ -29,7 +29,6 @@ export const parseFnb = (text) => {
   if (headerDateMatch) statementYear = parseInt(headerDateMatch[1]);
 
   // 3. FIND TRANSACTION SECTION
-  // Look for the table header to find where transactions start
   const tableHeaderMatch = cleanText.match(/(Date|Datum)\s+(Description|Beskrywing)\s+(Amount|Bedrag)\s+(Balance|Balans)/i);
   if (!tableHeaderMatch) {
     console.warn("Could not find transaction table header");
@@ -39,8 +38,6 @@ export const parseFnb = (text) => {
   const transactionSection = cleanText.substring(tableHeaderMatch.index + tableHeaderMatch[0].length);
 
   // 4. SPLIT INTO TRANSACTION LINES
-  // Match patterns: Date followed by description, amount (with Cr/Dr), and balance
-  // Each transaction should have: Date Description Amount(Cr/Dr) Balance
   const transactionPattern = /(\d{2}\/\d{2}\/\d{4}|\d{4}\/\d{2}\/\d{2}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Mrt|Mei|Okt|Des))\s+(.*?)(?=\d{2}\/\d{2}\/\d{4}|\d{4}\/\d{2}\/\d{2}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Mrt|Mei|Okt|Des)|Closing Balance|Page Total|$)/gi;
 
   const matches = [...transactionSection.matchAll(transactionPattern)];
@@ -49,7 +46,7 @@ export const parseFnb = (text) => {
     const dateStr = match[1].trim();
     let dataBlock = match[2].trim();
 
-    // Skip header rows
+    // Skip header rows and empty lines
     const lowerBlock = dataBlock.toLowerCase();
     if (lowerBlock.includes("opening balance") || 
         lowerBlock.includes("brought forward") ||
@@ -58,29 +55,60 @@ export const parseFnb = (text) => {
       continue;
     }
 
-    // 5. EXTRACT AMOUNTS AND BALANCE FROM THE TRANSACTION LINE
-    // Strategy: Find all amounts, then identify which are transaction amounts vs balance
-    // Format is typically: Description Amount(Cr/Dr) Balance
-    // But amounts can appear in description too, so we need the last two valid amounts
+    // 5. EXTRACT AMOUNTS - REFINED STRATEGY
+    // The key insight: Transaction amounts are typically followed by Cr/Dr markers
+    // Balance is the last number (may or may not have Cr/Dr)
+    // Amounts in descriptions typically don't have Cr/Dr markers
     
-    // Match currency amounts (with optional Cr/Dr markers)
-    const amountPattern = /\b([\d\s,]+\.\d{2})\s*(Cr|Dr|Kt|Dt)?\b/gi;
-    const allAmounts = [...dataBlock.matchAll(amountPattern)];
+    // First, find all potential amounts with their markers
+    const amountWithMarkerPattern = /([\d\s,]+\.\d{2})\s*(Cr|Dr|Kt|Dt)/gi;
+    const markedAmounts = [...dataBlock.matchAll(amountWithMarkerPattern)];
     
-    // Filter out reference numbers (numbers without proper formatting)
-    const validAmounts = allAmounts.filter(amt => {
-      const numStr = amt[1].replace(/[\s,]/g, '');
-      // Must be a reasonable currency amount (not a reference number)
-      return numStr.length <= 12 && (amt[1].includes(',') || amt[1].includes(' ') || parseFloat(numStr) < 100000000);
-    });
+    // Also find all amounts (for balance, which might not have marker)
+    const allAmountPattern = /\b([\d\s,]+\.\d{2})\b/g;
+    const allAmounts = [...dataBlock.matchAll(allAmountPattern)];
+    
+    let amountMatch = null;
+    let balanceMatch = null;
+    let amount = 0;
+    let balance = 0;
+    let amountSign = '';
 
-    if (validAmounts.length < 2) {
-      continue; // Need at least amount and balance
+    // STRATEGY:
+    // - If we have 2+ marked amounts (with Cr/Dr): second-to-last is amount, last is balance
+    // - If we have 1 marked amount: it's the amount, last unmarked number is balance
+    // - Otherwise: second-to-last number is amount, last is balance
+    
+    if (markedAmounts.length >= 2) {
+      // Best case: both amount and balance have markers
+      amountMatch = markedAmounts[markedAmounts.length - 2];
+      balanceMatch = markedAmounts[markedAmounts.length - 1];
+      amountSign = amountMatch[2];
+    } else if (markedAmounts.length === 1) {
+      // One marked amount (transaction), balance is last unmarked
+      amountMatch = markedAmounts[0];
+      amountSign = amountMatch[2];
+      balanceMatch = allAmounts[allAmounts.length - 1];
+    } else if (allAmounts.length >= 2) {
+      // No markers, use last two amounts
+      // Filter out obvious reference numbers first
+      const validAmounts = allAmounts.filter(amt => {
+        const numStr = amt[1].replace(/[\s,]/g, '');
+        const num = parseFloat(numStr);
+        // Exclude very large numbers (likely references) and numbers without formatting
+        return numStr.length <= 12 && 
+               (amt[1].includes(',') || amt[1].includes(' ') || num < 1000000);
+      });
+      
+      if (validAmounts.length >= 2) {
+        amountMatch = validAmounts[validAmounts.length - 2];
+        balanceMatch = validAmounts[validAmounts.length - 1];
+      } else {
+        continue; // Can't parse this transaction
+      }
+    } else {
+      continue; // Not enough data
     }
-
-    // Last amount is balance, second-to-last is transaction amount
-    const balanceMatch = validAmounts[validAmounts.length - 1];
-    const amountMatch = validAmounts[validAmounts.length - 2];
 
     // 6. PARSE NUMBERS
     const parseAmount = (matchObj) => {
@@ -88,24 +116,27 @@ export const parseFnb = (text) => {
       return parseFloat(numStr);
     };
 
-    let amount = parseAmount(amountMatch);
-    const balance = parseAmount(balanceMatch);
+    amount = parseAmount(amountMatch);
+    balance = parseAmount(balanceMatch);
 
-    // 7. EXTRACT DESCRIPTION (everything before the amount)
+    // 7. EXTRACT DESCRIPTION (everything before the transaction amount)
     const amountIndex = amountMatch.index;
     let description = dataBlock.substring(0, amountIndex).trim();
     
-    // Clean up description
+    // Clean up description - remove leading numbers and markers
     description = description.replace(/^[\d\s\.,]+/, '').trim();
     description = description.replace(/^(Kt|Dt|Dr|Cr)\s+/i, '').trim();
     description = description.replace(/\s+/g, ' ').trim();
 
     // 8. DETERMINE SIGN (Credit vs Debit)
-    const amountIndicator = amountMatch[2] || '';
-    if (amountIndicator.toUpperCase() === 'CR' || amountIndicator.toUpperCase() === 'KT') {
+    if (amountSign.toUpperCase() === 'CR' || amountSign.toUpperCase() === 'KT') {
       amount = Math.abs(amount);  // Credit = Positive
-    } else {
+    } else if (amountSign.toUpperCase() === 'DR' || amountSign.toUpperCase() === 'DT') {
       amount = -Math.abs(amount); // Debit = Negative
+    } else {
+      // No explicit marker - infer from balance change
+      // This is a fallback and might need adjustment based on your statement format
+      amount = -Math.abs(amount); // Default to debit
     }
 
     // 9. NORMALIZE DATE
