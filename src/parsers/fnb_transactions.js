@@ -15,84 +15,122 @@ export const parseFnb = (text) => {
   const yearMatch = text.match(/(\d{4})\/\d{2}\/\d{2}/);
   if (yearMatch) statementYear = parseInt(yearMatch[1]);
 
-  // 2. SPLIT BY TRANSACTION DATES
-  const dateSplitRegex = /(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec))/g;
-  const parts = text.split(dateSplitRegex);
+  // 2. FIND TRANSACTION SECTION
+  // Look for "Transactions in RAND" and stop at "Closing Balance"
+  const transStartMatch = text.match(/Transactions in RAND.*?(?:Date.*?Description.*?Amount.*?Balance|$)/is);
+  if (!transStartMatch) {
+    console.warn("Transaction section not found");
+    return transactions;
+  }
 
-  // Process parts: odd indices are dates, even indices are the transaction data
+  let transSection = text.substring(transStartMatch.index + transStartMatch[0].length);
+  
+  // Stop at "Closing Balance" - but be careful not to include it
+  const closingMatch = transSection.match(/Closing Balance/i);
+  if (closingMatch) {
+    transSection = transSection.substring(0, closingMatch.index);
+  }
+
+  // 3. SPLIT BY DATES THEN PARSE EACH BLOCK
+  // Split the continuous text by date markers
+  const dateSplitRegex = /(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec))/gi;
+  const parts = transSection.split(dateSplitRegex);
+  
+  const matches = [];
+  
+  // Process date-data pairs
   for (let i = 1; i < parts.length; i += 2) {
-    const dateStr = parts[i].trim();
+    const dateStr = parts[i];
     const dataBlock = parts[i + 1] || "";
     
-    if (dataBlock.length < 10) continue;
-
-    // Skip header sections
+    if (dataBlock.length < 5) continue;
+    
+    // Skip headers
     if (dataBlock.toLowerCase().includes('opening balance') ||
-        dataBlock.toLowerCase().includes('description amount balance')) {
+        dataBlock.toLowerCase().includes('description')) {
       continue;
     }
-
-    // 3. EXTRACT AMOUNTS - WITH FILTERING
-    // Look for currency amounts with proper formatting
-    const amountPattern = /([\d,]+\.\d{2})(Cr)?/g;
-    const allAmounts = [...dataBlock.matchAll(amountPattern)];
-
-    // FILTER: Remove amounts that are likely reference numbers
-    const validAmounts = allAmounts.filter(match => {
-      const numStr = match[1].replace(/,/g, '');
-      const num = parseFloat(numStr);
-      
-      // Filter out invalid amounts:
-      // 1. Too large (> 1 billion = likely a reference number)
-      // 2. Has more than 2 digits before first comma/decimal in original (no proper formatting)
-      
-      if (num > 1000000000) return false; // Too large
-      
-      // Check if properly formatted (has commas for thousands)
-      // Valid: "9,500.00" or "350.00" (under 1000)
-      // Invalid: "27839489137350.00" (no commas in large number)
-      if (num >= 1000 && !match[1].includes(',')) return false;
-      
+    
+    // Find all currency amounts in this block
+    const amountRegex = /([\d,]+\.\d{2})(Cr)?/g;
+    const amounts = [...dataBlock.matchAll(amountRegex)];
+    
+    // Filter valid amounts (not reference numbers)
+    const validAmounts = amounts.filter(amt => {
+      const num = parseFloat(amt[1].replace(/,/g, ''));
+      // Reject if > 100 million OR if large number without commas
+      if (num > 100000000) return false;
+      if (num >= 1000 && !amt[1].includes(',')) return false;
       return true;
     });
-
-    // Need at least 2 valid amounts (transaction amount and balance)
+    
     if (validAmounts.length < 2) continue;
-
-    // Last valid amount is the balance, second-to-last is the transaction amount
-    const balanceMatch = validAmounts[validAmounts.length - 1];
+    
+    // Last two valid amounts are: amount, balance
     const amountMatch = validAmounts[validAmounts.length - 2];
-
-    // 4. EXTRACT DESCRIPTION
-    const amountIndex = amountMatch.index;
-    let description = dataBlock.substring(0, amountIndex).trim();
+    const balanceMatch = validAmounts[validAmounts.length - 1];
     
+    // Extract description (everything before the amount)
+    const descEnd = dataBlock.indexOf(amountMatch[0]);
+    let description = dataBlock.substring(0, descEnd).trim();
+    
+    matches.push({
+      dateStr,
+      description,
+      amountStr: amountMatch[1],
+      amountCr: amountMatch[2],
+      balanceStr: balanceMatch[1],
+      balanceCr: balanceMatch[2]
+    });
+  }
+  
+  // Now process all matches
+  for (const match of matches) {
+    const { dateStr, amountStr, amountCr, balanceStr, balanceCr } = match;
+    let { description } = match;
+
+  
+  // Now process all matches
+  for (const match of matches) {
+    const { dateStr, amountStr, amountCr, balanceStr, balanceCr } = match;
+    let { description } = match;
+
     // Clean description
+    description = description.trim();
+    
+    // Remove trailing numbers (reference codes and amounts that leaked in)
+    // Keep only text description
+    description = description.replace(/[\d\s,\.]+(?:Cr)?$/i, '').trim();
+    
+    // Remove excess whitespace
     description = description.replace(/\s+/g, ' ').trim();
-    description = description.replace(/^[\d\s\.,;:]+/, '').trim();
     
-    // Remove any trailing long numbers (likely reference numbers that slipped through)
-    description = description.replace(/\s*\d{10,}\s*$/, '').trim();
-    
-    // Skip invalid descriptions
-    if (description.length < 3 || 
-        description.toLowerCase().includes('accrued') ||
-        description.toLowerCase().includes('charges')) {
-      continue;
-    }
+    // Remove leading numbers
+    description = description.replace(/^[\d\s,\.;:]+/, '').trim();
 
-    // 5. PARSE NUMBERS
-    let amount = parseFloat(amountMatch[1].replace(/,/g, ''));
-    const balance = parseFloat(balanceMatch[1].replace(/,/g, ''));
+    // Skip if description is too short
+    if (description.length < 3) continue;
+
+    // Parse amount
+    let amount = parseFloat(amountStr.replace(/,/g, ''));
     
-    // Credit transactions have "Cr" suffix (positive), debits don't (negative)
-    if (amountMatch[2] === 'Cr') {
+    // Sanity check: amount shouldn't be absurdly large (indicates parsing error)
+    if (amount > 1000000000) continue;
+    
+    // Credit = positive, Debit = negative
+    if (amountCr === 'Cr') {
       amount = Math.abs(amount);
     } else {
       amount = -Math.abs(amount);
     }
 
-    // 6. FORMAT DATE
+    // Parse balance
+    const balance = parseFloat(balanceStr.replace(/,/g, ''));
+    
+    // Sanity check on balance
+    if (balance > 1000000000) continue;
+
+    // Format date
     const [day, monthName] = dateStr.split(/\s+/);
     const monthMap = {
       jan: "01", feb: "02", mar: "03", apr: "04",
@@ -102,7 +140,6 @@ export const parseFnb = (text) => {
     const month = monthMap[monthName.toLowerCase().substring(0, 3)] || "01";
     const formattedDate = `${day.padStart(2, '0')}/${month}/${statementYear}`;
 
-    // 7. ADD TRANSACTION
     transactions.push({
       date: formattedDate,
       description: description,
