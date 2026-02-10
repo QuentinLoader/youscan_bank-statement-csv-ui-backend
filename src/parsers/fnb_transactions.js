@@ -56,14 +56,23 @@ export const parseFnb = (text) => {
         // CRITICAL FIX #1: Remove "Closing Balance" line to avoid duplicate number matches
         dataBlock = dataBlock.replace(/Closing Balance.*$/i, '').trim();
 
-        // 4. NUMBER EXTRACTION
-        const moneyRegex = /([\d\s,]+\.\d{2})\s?(Cr|Dr|Dt|Kt)?/gi;
+        // 4. NUMBER EXTRACTION - IMPROVED
+        // More strict regex: require word boundary or whitespace before amount
+        // Also ensure we don't match long reference numbers (like 0707502618)
+        const moneyRegex = /(?:^|\s)([\d\s,]{1,15}\.\d{2})(?:\s*(Cr|Dr|Dt|Kt))?(?:\s|$)/gi;
         const allMatches = [...dataBlock.matchAll(moneyRegex)];
+        
+        // Filter out matches that are clearly reference numbers (no spaces/commas in long numbers)
+        const validMatches = allMatches.filter(match => {
+            const numStr = match[1].replace(/[\s,]/g, '');
+            // If number is longer than 10 digits before decimal, it's likely a reference number
+            return numStr.length <= 12;
+        });
 
-        if (allMatches.length >= 2) {
+        if (validMatches.length >= 2) {
             // Amount is second last, Balance is last
-            const amountMatch = allMatches[allMatches.length - 2];
-            const balanceMatch = allMatches[allMatches.length - 1];
+            const amountMatch = validMatches[validMatches.length - 2];
+            const balanceMatch = validMatches[validMatches.length - 1];
             
             const cleanNum = (matchObj) => {
                 const numStr = matchObj[1].replace(/[\s,]/g, '');
