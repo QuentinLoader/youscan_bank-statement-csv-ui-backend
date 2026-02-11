@@ -1,42 +1,56 @@
 /**
- * FNB "Zero-Whitespace" Parser
- * * Designed for "mashed" PDF text where spaces are missing.
- * * Handles: "20JanReference100.00200.00"
+ * FNB Parser (Diagnostic Mode)
+ * * Includes console logging to debug PDF text extraction.
+ * * Uses "relaxed" regex to handle text with missing spaces (mashed text).
  */
 
 export const parseFnb = (text) => {
+  // --- DIAGNOSTIC LOGGING START ---
+  // This will print the raw text to your server console.
+  // Copy the output between the "---" markers if you still get 0 items.
+  console.log("--- RAW PDF TEXT START ---");
+  console.log(text.substring(0, 1000) + "..."); // Print first 1000 characters
+  console.log("--- RAW PDF TEXT END ---");
+  // --- DIAGNOSTIC LOGGING END ---
+
   const transactions = [];
 
-  // 1. METADATA (Relaxed matching)
+  // ===========================================================================
+  // 1. METADATA EXTRACTION
+  // ===========================================================================
+  // Robust matching for merged headers (e.g., "Account Number123456")
   const accountMatch = text.match(/Account\D*?(\d{11})/i) || text.match(/(\d{11})/);
   const account = accountMatch ? accountMatch[1] : "Unknown";
 
   const statementIdMatch = text.match(/BBST(\d+)/i);
   const uniqueDocNo = statementIdMatch ? statementIdMatch[1] : "Unknown";
 
-  // Client Name: Look for "PROPERTIES" or "LIVING BRANCH"
+  // Client Name: Matches "PROPERTIES", "LIVING BRANCH", "LTD", "PTY" etc.
   const clientMatch = text.match(/\*?([A-Z\s\.]+(?:PROPERTIES|LIVING|TRADING|LTD|PTY)[A-Z\s\.]*)/i);
   const clientName = clientMatch ? clientMatch[1].trim() : "Unknown";
 
-  // Year detection (Look for 202X/XX/XX)
+  // Year Detection: Looks for YYYY/MM/DD pattern in the header
   let currentYear = new Date().getFullYear();
   const dateHeader = text.match(/(20\d{2})\/\d{2}\/\d{2}/);
   if (dateHeader) currentYear = parseInt(dateHeader[1]);
 
+  // ===========================================================================
   // 2. TEXT CLEANUP
-  // Remove clutter but keep the stream intact
+  // ===========================================================================
   let cleanText = text
-    .replace(/Page \d+ of \d+/gi, '')
-    .replace(/Transactions in RAND/i, '');
+    .replace(/Page \d+ of \d+/gi, ' ') 
+    .replace(/Transactions in RAND/i, '')
+    .replace(/\r\n/g, '\n'); 
 
-  // 3. AGGRESSIVE PARSING (The "Mashed" Regex)
-  // Pattern: 
-  // [Date: 1-2 digits + 3 letters] (e.g. 20Jan)
-  // [Desc: Anything until a number] (Non-greedy)
-  // [Amount: Number.Number]
-  // [Balance: Number.Number]
+  // ===========================================================================
+  // 3. PARSING LOGIC (The "Mashed" Regex)
+  // ===========================================================================
+  // Pattern handles: "20JanDescription100.00" (Zero whitespace required)
+  // 1. Date (DD Mon)
+  // 2. Description (Non-greedy)
+  // 3. Amount (Number.Number)
+  // 4. Balance (Number.Number)
   
-  // Note: \s* means "zero or more spaces"
   const mashedRegex = /(\d{1,2})\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*(.*?)\s*([0-9,]+\.[0-9]{2})(Cr|Dr)?\s*([0-9,]+\.[0-9]{2})(Cr|Dr)?/gi;
 
   let match;
@@ -49,18 +63,15 @@ export const parseFnb = (text) => {
     const balanceRaw = match[6];
     
     // --- Validation ---
-    // If description contains "Opening Balance", skip
     if (description.toLowerCase().includes('opening balance')) continue;
-    
-    // If description is unreasonably long (>150 chars), it's a false positive
-    if (description.length > 150) continue;
+    if (description.length > 150) continue; // Skip false positives
 
     // --- Date Formatting ---
     const months = { Jan:'01', Feb:'02', Mar:'03', Apr:'04', May:'05', Jun:'06', Jul:'07', Aug:'08', Sep:'09', Oct:'10', Nov:'11', Dec:'12' };
-    const month = months[monthRaw] || months[monthRaw.substring(0,3)]; // Handle case sensitivity if needed
+    const month = months[monthRaw] || months[monthRaw.substring(0,3)]; 
     
     let txYear = currentYear;
-    // Year rollover logic (Dec trans in Jan statement)
+    // Handle Year Rollover (Dec transaction in Jan statement)
     if (month === '12' && new Date().getMonth() < 3) txYear = currentYear - 1;
     
     const dateStr = `${day}/${month}/${txYear}`;
@@ -69,14 +80,15 @@ export const parseFnb = (text) => {
     let amount = parseFloat(amountRaw.replace(/,/g, ''));
     let balance = parseFloat(balanceRaw.replace(/,/g, ''));
 
-    // FNB Logic: Cr = Income, No Sign = Expense
+    // FNB Logic: Cr = Income (+), No Sign = Expense (-)
     if (amountSign === 'Cr') {
       amount = Math.abs(amount);
     } else {
       amount = -Math.abs(amount);
     }
     
-    // Cleanup Description (remove loose dates/numbers at start)
+    // --- Description Cleanup ---
+    // Remove loose numbers/dates at start of description
     description = description.replace(/^[\d\-\.\s]+/, '');
 
     transactions.push({
