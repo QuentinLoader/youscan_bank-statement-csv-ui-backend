@@ -23,7 +23,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 app.get("/", (req, res) => res.send("YouScan Engine: Global Access Active"));
 
 /**
- * Main Route: Now supports Reconciliation Metadata
+ * Main Route: Smart Unwrap Logic
  */
 app.post("/parse", upload.any(), async (req, res) => {
   try {
@@ -43,35 +43,42 @@ app.post("/parse", upload.any(), async (req, res) => {
       try {
         const result = await parseStatement(file.buffer);
         
-        // --- 1. HANDLE RETURN TYPE (Object vs Array) ---
+        // --- SMART UNWRAP LOGIC ---
         let rawTransactions = [];
-        let statementMetadata = {}; // This will hold Opening/Closing balances
+        let statementMetadata = {}; 
 
+        // Scenario A: The perfect format { metadata, transactions: [] }
         if (result.transactions && Array.isArray(result.transactions)) {
-          // NEW: Parser returned { metadata, transactions }
           rawTransactions = result.transactions;
           statementMetadata = result.metadata || {};
-          console.log(`📊 Extracted ${rawTransactions.length} items (with metadata)`);
-        } else if (Array.isArray(result)) {
-          // OLD: Parser returned just [ ... ]
+        } 
+        // Scenario B: The "Nesting Doll" Bug (Service wrapped our Object inside 'transactions')
+        else if (result.transactions && result.transactions.transactions && Array.isArray(result.transactions.transactions)) {
+          console.log("🔧 Fixing double-nested transactions from middleware...");
+          rawTransactions = result.transactions.transactions;
+          statementMetadata = result.transactions.metadata || {};
+        }
+        // Scenario C: Legacy Array [ ... ]
+        else if (Array.isArray(result)) {
           rawTransactions = result;
-          console.log(`📊 Extracted ${rawTransactions.length} items (legacy array)`);
-        } else {
-          // Fallback
-          rawTransactions = [];
+        } 
+        else {
           console.warn(`⚠️ Warning: Parser returned unexpected format for ${file.originalname}`);
+          console.log("Debug dump:", JSON.stringify(result).substring(0, 200)); // Log for debugging
+          continue; // Skip this file
         }
 
-        // --- 2. STANDARDIZE & INJECT METADATA ---
+        console.log(`📊 Extracted ${rawTransactions.length} items (Balance: ${statementMetadata.openingBalance || '?'} -> ${statementMetadata.closingBalance || '?'})`);
+
+        // --- STANDARDIZE & INJECT METADATA ---
         const standardized = rawTransactions.map(t => ({
           ...t,
           // Standard Fields
-          bankName: t.bankName || "FNB", // Default to FNB if missing
+          bankName: t.bankName || "FNB", 
           bankLogo: t.bankLogo || "fnb",
           sourceFile: file.originalname,
           
           // RECONCILIATION DATA
-          // We attach this to every row so the Frontend Grid has access to the Truth
           statementMetadata: {
             openingBalance: statementMetadata.openingBalance || 0,
             closingBalance: statementMetadata.closingBalance || 0,
@@ -83,11 +90,9 @@ app.post("/parse", upload.any(), async (req, res) => {
 
       } catch (parseError) {
         console.error(`❌ Error parsing file ${file.originalname}:`, parseError.message);
-        // We continue to the next file instead of crashing the whole request
       }
     }
 
-    // Return the combined array to the frontend
     res.json(allTransactions);
 
   } catch (error) {
