@@ -2,11 +2,18 @@ import express from "express";
 import cors from "cors";
 import multer from "multer";
 import { parseStatement } from "./services/parseStatement.js";
+import pool from "./config/db.js"; //temp - delete
 
 /* ✅ ADD THIS LINE */
 import authRoutes from "./routes/auth.routes.js";
 
 const app = express();
+
+// 1. Temp - check the connection
+app.get("/db-debug", async (req, res) => {
+  const result = await pool.query("SELECT current_database()");
+  res.json(result.rows);
+});
 
 // 1. NUCLEAR CORS (Allows everything for development)
 app.use(cors({
