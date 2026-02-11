@@ -1,6 +1,6 @@
-# SlimJan
+# YouScan
 
-**SlimJan** converts South African bank statements (PDF) into clean, accountant-ready CSV files.
+**YouScan** converts South African bank statements (PDF) into clean, accountant-ready CSV files.
 
 Designed for:
 - Accountants
