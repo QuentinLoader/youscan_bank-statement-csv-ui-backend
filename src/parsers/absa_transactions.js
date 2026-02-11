@@ -1,10 +1,9 @@
 /**
- * ABSA Parser (Robust & Reconciled)
+ * ABSA Parser (Date-Split Strategy)
  * * Strategy:
- * 1. Handles "Mashed" text (e.g. "2025Description").
- * 2. Normalizes ABSA numbers ("1 234,56-").
- * 3. Uses Balance-Driven logic to verify amounts and fix merged text.
- * 4. Returns { metadata, transactions } for Lovable.
+ * 1. Metadata: handled with relaxed regex for mashed text ("Forward0,00").
+ * 2. Segmentation: Split text by Date Pattern (DD/MM/YYYY).
+ * 3. Extraction: Find all numbers in the chunk. Use "Balance Math" to identify the correct Amount.
  */
 
 export const parseAbsa = (text) => {
@@ -17,143 +16,148 @@ export const parseAbsa = (text) => {
     if (!val) return 0;
     let clean = val.trim();
     
-    // Handle trailing minus (100.00-) -> -100.00
+    // Handle trailing minus (100.00-)
     let isNegative = clean.endsWith('-');
-    if (isNegative) {
-        clean = clean.substring(0, clean.length - 1);
-    }
+    if (isNegative) clean = clean.substring(0, clean.length - 1);
     
-    // Remove spaces (thousands separator) and replace comma with dot
-    clean = clean.replace(/\s/g, '').replace(',', '.');
+    // Remove spaces (thousands) and replace comma with dot
+    // Regex: Remove all non-numeric chars except comma and dot
+    clean = clean.replace(/[^0-9,.]/g, '').replace(',', '.');
     
-    // Safety check for non-numeric junk
-    if (isNaN(clean)) return 0;
-
     let num = parseFloat(clean);
     return isNegative ? -Math.abs(num) : num;
   };
 
   // ===========================================================================
-  // 2. METADATA EXTRACTION (Relaxed Regex)
+  // 2. METADATA EXTRACTION
   // ===========================================================================
-  
-  // Account: Look for pattern near "Account" or standalone 10-digit format
   const accountMatch = text.match(/Account\D*?([\d-]{10,})/i) || text.match(/(\d{2}-\d{4}-\d{4})/);
   let account = accountMatch ? accountMatch[1].replace(/-/g, '') : "Unknown";
 
-  // Opening Balance (Relaxed to handle "Forward0,00")
+  // Opening Balance - Fix for mashed "Forward0,00"
   let openingBalance = 0;
-  // Regex: "Balance Brought Forward" ... [Number]
-  const openMatch = text.match(/Balance Brought Forward.*?([0-9\s]+,[0-9]{2}-?)/i);
+  // Look for "Balance Brought Forward" followed immediately by potential number
+  const openMatch = text.match(/Balance Brought Forward\D*?([0-9\s]+,[0-9]{2}-?)/i);
   if (openMatch) {
       openingBalance = parseAbsaNum(openMatch[1]);
   }
 
-  // Closing Balance (Look for the final balance in summary)
+  // Closing Balance - Look for "Balance" in summary block
   let closingBalance = 0;
-  // Strategy: Find "Balance" followed by a number at the end of the text block is risky.
-  // Better: Look for "Balance" key in the summary section (usually implies closing)
-  // ABSA Summary often has: "Charges... Balance... Overdraft"
-  const summaryMatch = text.match(/Charges.*?Balance\s*([0-9\s]+,[0-9]{2}-?)/is);
+  const summaryMatch = text.match(/Charges\D*?Balance\s*([0-9\s]+,[0-9]{2}-?)/is);
   if (summaryMatch) {
       closingBalance = parseAbsaNum(summaryMatch[1]);
   }
 
   // ===========================================================================
-  // 3. TEXT CLEANUP
+  // 3. TRANSACTION PARSING (Date-Split)
   // ===========================================================================
   let cleanText = text
     .replace(/\s+/g, ' ') 
-    .replace(/Page \d+ of \d+/gi, ' ')
-    // Protect the "Balance Brought Forward" so it doesn't get parsed as a transaction
-    .replace(/Balance Brought Forward/gi, 'OB_Marker'); 
+    .replace(/Page \d+ of \d+/gi, ' ');
 
-  // ===========================================================================
-  // 4. PARSING LOGIC
-  // ===========================================================================
-  // ABSA Pattern: Date ... Description ... Amount ... Balance
-  // We use \s* (zero or more spaces) to handle mashed text.
-  
-  // Regex Breakdown:
-  // 1. Date: DD/MM/YYYY
-  // 2. Description: (Greedy match)
-  // 3. Amount: Number (with comma decimal and optional trailing minus)
-  // 4. Balance: Number (same format)
-  
-  const absaRegex = /(\d{2}\/\d{2}\/\d{4})\s*(.*?)\s*([0-9\s]+,[0-9]{2}-?)\s*([0-9\s]+,[0-9]{2}-?)/gi;
+  // Split by Date Pattern: Lookahead for DD/MM/YYYY
+  // This creates an array where each item starts with a date
+  const chunks = cleanText.split(/(?=\d{2}\/\d{2}\/\d{4})/);
 
-  let match;
   let runningBalance = openingBalance;
 
-  while ((match = absaRegex.exec(cleanText)) !== null) {
-    const dateStr = match[1];
-    let description = match[2].trim();
-    const amountRaw = match[3];
-    const balanceRaw = match[4];
+  chunks.forEach(chunk => {
+    // 1. Validate Chunk starts with Date
+    const dateMatch = chunk.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    if (!dateMatch) return; // Skip headers/garbage
 
-    // Parse Financials
-    const finalBalance = parseAbsaNum(balanceRaw);
-    let finalAmount = parseAbsaNum(amountRaw);
+    const dateStr = `${dateMatch[1]}/${dateMatch[2]}/${dateMatch[3]}`;
+    let rawContent = chunk.substring(10).trim(); // Remove date from start
 
-    // --- BALANCE-DRIVEN VERIFICATION ---
-    // Calculate what the amount *should* be based on balance movement
-    const expectedDiff = finalBalance - runningBalance;
-    const expectedAbs = Math.abs(expectedDiff);
+    // Skip "Balance Brought Forward" lines if they were caught by split
+    if (rawContent.toLowerCase().includes("balance brought forward")) return;
 
-    // Check if Parsed Amount matches Expected Amount (Tolerance 0.02)
-    if (Math.abs(Math.abs(finalAmount) - expectedAbs) > 0.02) {
-        
-        // DISCREPANCY detected.
-        // It's possible the regex grabbed "Charges" + "Amount" as one Description,
-        // or a merged number occurred.
-        
-        // Trust the Math?
-        // In ABSA, columns are strict. If we miss a column (e.g. Credit is empty),
-        // the regex might grab the Balance as the Amount.
-        
-        // Check if `finalAmount` is actually the Balance?
-        // (If regex skipped a column)
-        // No, because we captured two numbers. 
-        
-        // Check if the Expected Amount is buried in the Description?
-        // (Unlikely for ABSA column layouts, but possible if mashed)
-        
-        // Fallback: If the parsed amount is clearly wrong, trust the Balance Math.
-        // ABSA Statements are sequential.
-        finalAmount = expectedDiff;
-        description = description + " [Calc Fix]";
+    // 2. SCAVENGE NUMBERS
+    // Find all strings that look like ABSA numbers: "1 234,56" or "50,00-"
+    // Regex: Digits, optional spaces, comma, 2 digits, optional minus
+    const numRegex = /(\d{1,3}(?: \d{3})*,\d{2}-?)/g;
+    const numbersFound = rawContent.match(numRegex);
+
+    if (!numbersFound || numbersFound.length === 0) return;
+
+    // 3. BALANCE LOGIC
+    // The LAST number in the row is almost certainly the Balance.
+    const candidateBalanceStr = numbersFound[numbersFound.length - 1];
+    const currentBalance = parseAbsaNum(candidateBalanceStr);
+
+    // Calculate the Amount based on math
+    const mathDiff = currentBalance - runningBalance;
+    const mathAbs = Math.abs(mathDiff);
+
+    let finalAmount = 0;
+    let amountStrFound = null;
+
+    // 4. FIND AMOUNT
+    // Does our calculated 'mathDiff' match any of the other numbers found?
+    // We search the array (excluding the last one which is the balance)
+    const potentialAmounts = numbersFound.slice(0, -1);
+    
+    // Try to find exact match
+    const matchIndex = potentialAmounts.findIndex(numStr => {
+        return Math.abs(parseAbsaNum(numStr) - mathAbs) < 0.02;
+    });
+
+    if (matchIndex !== -1) {
+        // Found it! Logic matches text.
+        finalAmount = mathDiff; // Trust the math for sign
+        amountStrFound = potentialAmounts[matchIndex];
     } else {
-        // If values match, ensure the Sign is correct based on math.
-        // (ABSA text usually has the sign, but this is a double-check)
-        finalAmount = expectedDiff;
+        // Math didn't match perfectly.
+        // Fallback: Take the last number before the balance?
+        // Or trust the math blindly if we are confident?
+        // Let's trust the math if it's non-zero.
+        if (potentialAmounts.length > 0) {
+            // Take the largest number? Or the one right before balance?
+            // Usually Amount is right before Balance.
+            // But ABSA has "Charges" column too.
+            // Let's trust the math. It auto-corrects signs.
+            finalAmount = mathDiff;
+        } else {
+           // Only one number found (The balance itself)?
+           // Then no transaction amount? Skip.
+           return;
+        }
     }
 
-    // Update Tracker
-    runningBalance = finalBalance;
+    // 5. EXTRACT DESCRIPTION
+    // Remove the Balance string
+    let description = rawContent.replace(candidateBalanceStr, '');
+    
+    // Remove the Amount string if we found it
+    if (amountStrFound) {
+        description = description.replace(amountStrFound, '');
+    } else {
+        // If we didn't find specific string, remove all numbers to be safe
+        description = description.replace(numRegex, '');
+    }
 
-    // Cleanup Description
+    // Cleanup
     description = description
-        .replace(/OB_Marker/g, '') // Remove our temp marker if leaked
-        .replace(/^[\d\-\.,\s]+/, '') // Remove leading junk
+        .replace(/Settlement/gi, '') 
+        .replace(/^[\d\-\.,\s]+/, '') // Remove leading number junk
         .trim();
-        
-    // Filter out summary lines captured by mistake
-    if (description.toLowerCase().includes("statement no") || 
-        description.toLowerCase().includes("account summary")) continue;
+
+    // Update Tracker
+    runningBalance = currentBalance;
 
     transactions.push({
       date: dateStr,
-      description: description,
-      amount: finalAmount, // Returns float (negative for debit)
-      balance: finalBalance,
+      description: description || "Transaction",
+      amount: finalAmount,
+      balance: currentBalance,
       account: account,
-      uniqueDocNo: "ABSA-Stmt",
-      bankName: "ABSA"
+      uniqueDocNo: "ABSA-Stmt"
     });
-  }
+  });
 
   // ===========================================================================
-  // 5. RETURN OBJECT
+  // 4. RETURN OBJECT
   // ===========================================================================
   return {
     metadata: {
