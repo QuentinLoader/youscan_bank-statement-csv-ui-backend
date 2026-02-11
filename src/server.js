@@ -23,12 +23,10 @@ const upload = multer({ storage: multer.memoryStorage() });
 app.get("/", (req, res) => res.send("YouScan Engine: Global Access Active"));
 
 /**
- * Main Route: Now uses upload.any() to prevent "Unexpected Field" errors
- * Supports single and multiple file uploads automatically.
+ * Main Route: Now supports Reconciliation Metadata
  */
 app.post("/parse", upload.any(), async (req, res) => {
   try {
-    // upload.any() populates req.files regardless of the field name used by Lovable
     const files = req.files || [];
     
     if (files.length === 0) {
@@ -42,31 +40,64 @@ app.post("/parse", upload.any(), async (req, res) => {
     for (const file of files) {
       console.log(`✅ YouScan processing: ${file.originalname} (Field: ${file.fieldname})`);
       
-      const result = await parseStatement(file.buffer);
-      
-      // Standardize the response with bank metadata for Lovable UI
-      const transactionsWithMetadata = (result.transactions || []).map(t => ({
-        ...t,
-        bankName: result.bankName,
-        bankLogo: result.bankLogo,
-        sourceFile: file.originalname
-      }));
+      try {
+        const result = await parseStatement(file.buffer);
+        
+        // --- 1. HANDLE RETURN TYPE (Object vs Array) ---
+        let rawTransactions = [];
+        let statementMetadata = {}; // This will hold Opening/Closing balances
 
-      allTransactions = [...allTransactions, ...transactionsWithMetadata];
-      console.log(`📊 Extracted ${result.transactions.length} items from ${result.bankName}`);
+        if (result.transactions && Array.isArray(result.transactions)) {
+          // NEW: Parser returned { metadata, transactions }
+          rawTransactions = result.transactions;
+          statementMetadata = result.metadata || {};
+          console.log(`📊 Extracted ${rawTransactions.length} items (with metadata)`);
+        } else if (Array.isArray(result)) {
+          // OLD: Parser returned just [ ... ]
+          rawTransactions = result;
+          console.log(`📊 Extracted ${rawTransactions.length} items (legacy array)`);
+        } else {
+          // Fallback
+          rawTransactions = [];
+          console.warn(`⚠️ Warning: Parser returned unexpected format for ${file.originalname}`);
+        }
+
+        // --- 2. STANDARDIZE & INJECT METADATA ---
+        const standardized = rawTransactions.map(t => ({
+          ...t,
+          // Standard Fields
+          bankName: t.bankName || "FNB", // Default to FNB if missing
+          bankLogo: t.bankLogo || "fnb",
+          sourceFile: file.originalname,
+          
+          // RECONCILIATION DATA
+          // We attach this to every row so the Frontend Grid has access to the Truth
+          statementMetadata: {
+            openingBalance: statementMetadata.openingBalance || 0,
+            closingBalance: statementMetadata.closingBalance || 0,
+            statementId: statementMetadata.statementId || "Unknown"
+          }
+        }));
+
+        allTransactions = [...allTransactions, ...standardized];
+
+      } catch (parseError) {
+        console.error(`❌ Error parsing file ${file.originalname}:`, parseError.message);
+        // We continue to the next file instead of crashing the whole request
+      }
     }
 
     // Return the combined array to the frontend
     res.json(allTransactions);
 
   } catch (error) {
-    console.error("❌ YouScan Error:", error.message);
+    console.error("❌ YouScan Global Error:", error.message);
     res.status(500).json({ error: "Parsing failed", details: error.message });
   }
 });
 
 /**
- * Simple Auth Gate: Validation for the '007' access code
+ * Simple Auth Gate
  */
 app.post("/verify-gate", (req, res) => {
   const { code } = req.body;
