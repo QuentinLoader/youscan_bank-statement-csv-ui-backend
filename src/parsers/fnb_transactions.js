@@ -1,147 +1,148 @@
 /**
- * FNB PDF Statement Parser (Robust "Anchor & Slice" Version)
- * * Strategy:
- * 1. Anchors on the financial columns (Balance & Fee) at the end of lines.
- * 2. Handled "Merged Text" (e.g. "Ref1234500.00") by slicing numbers off the description string.
- * 3. Extracts Date from the remaining text block, regardless of position.
+ * FNB PDF Parser (Global Stream Version)
+ * * why this works:
+ * 1. Ignores newlines/layout (fixes "0 items" error).
+ * 2. Scans for the "Financial Fingerprint": [Amount] [Balance] [Fee?].
+ * 3. Handles "Merged Text" (e.g., "Ref1234500.00") by detecting numbers without word boundaries.
+ * 4. Extracts metadata even if labels are merged (e.g., "Account Number12345...").
  */
 
 export const parseFnb = (text) => {
   const transactions = [];
 
   // ===========================================================================
-  // 1. METADATA EXTRACTION
+  // 1. ROBUST METADATA EXTRACTION
   // ===========================================================================
-  const accountMatch = text.match(/Account Number\s*[:\.]?\s*(\d{11})/i) || text.match(/(\d{11})/);
+  // Handles merged headers like "Account Number115624..."
+  const accountMatch = text.match(/Account Number\D*(\d{11})/i) || text.match(/(\d{11})/);
   const account = accountMatch ? accountMatch[1] : "Unknown";
 
-  const statementIdMatch = text.match(/Statement Number\s*[:\.]?\s*(\d+)/i) || text.match(/BBST(\d+)/i);
+  const statementIdMatch = text.match(/Statement Number\D*(\d+)/i) || text.match(/BBST(\d+)/i);
   const uniqueDocNo = statementIdMatch ? statementIdMatch[1] : "Unknown";
 
-  // Determine Year from Statement Period
-  let currentYear = new Date().getFullYear();
-  const periodMatch = text.match(/Statement Period.*?\d{1,2}\s+[A-Za-z]+\s+(\d{4})/i);
-  if (periodMatch) {
-    currentYear = parseInt(periodMatch[1], 10);
-  }
-
-  const clientMatch = text.match(/\*([A-Z\s]+PROPERTIES)/);
+  const clientMatch = text.match(/\*([A-Z\s]+PROPERTIES)/) || text.match(/([A-Z\s]+PROPERTIES)/);
   const clientName = clientMatch ? clientMatch[1].trim() : "Unknown";
 
+  // Determine Year (Default to current, adjust if we find a statement period)
+  let currentYear = new Date().getFullYear();
+  const periodMatch = text.match(/Statement Period.*?\d{4}/i);
+  if (periodMatch) {
+    const yearInPeriod = periodMatch[0].match(/(\d{4})/);
+    if (yearInPeriod) currentYear = parseInt(yearInPeriod[1], 10);
+  }
+
   // ===========================================================================
-  // 2. TEXT CLEANUP
+  // 2. PRE-PROCESSING
   // ===========================================================================
-  // Remove headers/footers that interrupt transaction flows
+  // Remove footer junk that might disrupt the stream
   let cleanText = text
     .replace(/Page \d+ of \d+/gi, '')
-    .replace(/Delivery Method.*?$/gim, '')
-    .replace(/Branch Number.*?Account Number/is, '') 
-    .replace(/Transactions in RAND/i, 'START_TRANSACTIONS');
+    .replace(/Delivery Method[^\n]*/gi, '')
+    .replace(/Branch Number[^\n]*/gi, ''); // Remove the messy header table if possible
 
-  const startMarker = cleanText.indexOf('START_TRANSACTIONS');
-  if (startMarker !== -1) cleanText = cleanText.substring(startMarker);
-
-  // Remove Closing Balance section to avoid false positives
-  const closingMarker = cleanText.match(/Closing Balance\s+[\d,]+\.\d{2}/i);
-  if (closingMarker) cleanText = cleanText.substring(0, closingMarker.index);
+  // Find where transactions start to avoid parsing the header as a transaction
+  const startMarker = cleanText.match(/Transactions in RAND/i);
+  let scanStartIndex = startMarker ? startMarker.index + startMarker[0].length : 0;
 
   // ===========================================================================
-  // 3. ROW PARSING (The "Anchor" Strategy)
+  // 3. GLOBAL MATCHING (The "Financial Anchor")
   // ===========================================================================
-  // We split by detecting the financial block at the end of a line.
-  // Pattern: Amount (space) Balance (space Fee? optional)
+  // We look for: Number + (Cr/Dr)? + Space + Number + (Cr/Dr)? + (Optional Fee)
+  // This Regex is the "Truth Source".
   
-  // 1. Split text into lines, but re-join wrapped lines. 
-  // Actually, simpler: regex match the whole block ending in numbers.
-  
-  // Regex: 
-  // Group 1: Description (greedy)
-  // Group 2: Amount (digits, commas, dot, 2 digits, optional Cr/Dr)
-  // Group 3: Balance (same format)
-  // Group 4: Optional Fee (same format, optional)
-  // Note: We use [\s\S]*? for description to match across wrapped lines if needed, 
-  // but usually FNB PDF text extraction is linear.
-  
-  // We filter for lines that end with at least TWO numbers (Amount + Balance).
-  // "Fee" is the optional 3rd number.
-  
-  const linePattern = /(.*?)\s+([0-9,]+\.[0-9]{2})(Cr|Dr)?\s+([0-9,]+\.[0-9]{2})(Cr|Dr)?(?:\s+([0-9,]+\.[0-9]{2})(Cr|Dr)?)?$/gm;
+  const transactionRegex = /([0-9,]+\.[0-9]{2})(Cr|Dr)?\s+([0-9,]+\.[0-9]{2})(Cr|Dr)?(?:\s+([0-9,]+\.[0-9]{2})(Cr|Dr)?)?/g;
   
   let match;
-  while ((match = linePattern.exec(cleanText)) !== null) {
-    let rawDesc = match[1].trim();
-    
-    // --- FINANCIALS ---
-    // Standard FNB Order: Amount -> Balance -> [Fee]
-    let amountStr = match[2];
-    let amountSign = match[3]; // Cr or Dr or undefined
-    let balanceStr = match[4];
-    
-    // Check if there is a 3rd number (Fee)
-    // If match[6] exists, it's the Fee. Balance is match[4]. Amount is match[2].
-    // Sometimes text merges happen. We need to be careful.
-    
-    // --- HANDLING MERGED AMOUNTS ---
-    // If the Amount (match[2]) was stripped correctly, `rawDesc` is clean.
-    // BUT, if the text was "Ref100500.00", the regex might capture "500.00" as match[2]
-    // leaving "Ref100" in rawDesc. This is actually correct behavior!
-    // The issue in your previous code was splitting by space. Regex avoids this.
-    
-    // Parse Values
+  let lastMatchEndIndex = scanStartIndex;
+
+  // Set the regex cursor to the start of transactions
+  transactionRegex.lastIndex = scanStartIndex;
+
+  while ((match = transactionRegex.exec(cleanText)) !== null) {
+    // 1. EXTRACT FINANCIALS
+    const amountStr = match[1];
+    const amountSign = match[2]; // Cr, Dr, or undefined
+    const balanceStr = match[3];
+    const feeStr = match[5]; // Optional Fee
+
+    // Parse Numbers
     let amount = parseFloat(amountStr.replace(/,/g, ''));
     let balance = parseFloat(balanceStr.replace(/,/g, ''));
-    
-    // Sign Logic: FNB "Cr" = Money In (+), No Sign/Dr = Money Out (-)
+    let fee = feeStr ? parseFloat(feeStr.replace(/,/g, '')) : 0;
+
+    // Apply Logic: FNB "Cr" = Income, No Sign/Dr = Expense
     if (amountSign === 'Cr') {
-        amount = Math.abs(amount);
+      amount = Math.abs(amount);
     } else {
-        amount = -Math.abs(amount);
+      amount = -Math.abs(amount);
     }
 
-    // --- DESCRIPTION & DATE ---
-    // Clean up the description
-    // FNB Dates: "DD Mon" (20 Jan) or "YYYY/MM/DD"
-    // Usually at the start or end of the text block.
+    // 2. EXTRACT DESCRIPTION & DATE
+    // The description is everything between the *end* of the last match 
+    // and the *start* of the current financial block.
+    // Note: match.index gives us the start of the Amount.
+    // If the text was "Ref1234500.00", match.index points to "5". 
+    // This perfectly splits "Ref1234" into the description!
     
+    let rawSegment = cleanText.substring(lastMatchEndIndex, match.index).trim();
+    
+    // Update pointer for next loop
+    lastMatchEndIndex = transactionRegex.lastIndex;
+
+    // Skip if this is just "Opening Balance"
+    if (rawSegment.toLowerCase().includes("opening balance")) continue;
+    
+    // Skip if empty or too short (garbage match)
+    if (rawSegment.length < 3) continue;
+
+    // 3. PARSE DATE (DD Mon or YYYY/MM/DD)
+    // FNB dates usually appear at the START of the description line, or strictly merged.
     let dateStr = "";
-    let cleanDesc = rawDesc;
-    
-    // Date Regex: "17 Jan" or "3 Feb"
-    const dateRegex = /\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/i;
-    const dateMatch = rawDesc.match(dateRegex);
-    
+    let cleanDesc = rawSegment;
+
+    // Regex: "17 Jan" or "03 Feb"
+    const datePattern = /(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/i;
+    const dateMatch = rawSegment.match(datePattern);
+
     if (dateMatch) {
-        // Construct Date
         const day = dateMatch[1].padStart(2, '0');
-        const monthStr = dateMatch[2].toLowerCase();
-        const months = { jan:'01', feb:'02', mar:'03', apr:'04', may:'05', jun:'06', jul:'07', aug:'08', sep:'09', oct:'10', nov:'11', dec:'12' };
+        const monthMap = { jan:'01', feb:'02', mar:'03', apr:'04', may:'05', jun:'06', jul:'07', aug:'08', sep:'09', oct:'10', nov:'11', dec:'12' };
+        const month = monthMap[dateMatch[2].toLowerCase().substring(0,3)];
         
-        // Year logic (Handle Dec/Jan crossover)
+        // Year Heuristic: If we are parsing Feb data but find "Dec", it's previous year.
         let txYear = currentYear;
-        if (monthStr === 'dec' && new Date().getMonth() < 3) txYear -= 1;
+        if (month === '12' && new Date().getMonth() < 3) txYear = currentYear - 1;
         
-        dateStr = `${day}/${months[monthStr]}/${txYear}`;
+        dateStr = `${day}/${month}/${txYear}`;
         
-        // Remove date from description
+        // Remove Date from Description
         cleanDesc = cleanDesc.replace(dateMatch[0], '').trim();
     } else {
-        // Fallback or explicit YYYY/MM/DD
-        dateStr = `01/01/${currentYear}`;
+        // Fallback: Check for YYYY/MM/DD
+        const isoMatch = rawSegment.match(/(\d{4})\/(\d{2})\/(\d{2})/);
+        if (isoMatch) {
+            dateStr = `${isoMatch[3]}/${isoMatch[2]}/${isoMatch[1]}`; // DD/MM/YYYY
+             cleanDesc = cleanDesc.replace(isoMatch[0], '').trim();
+        } else {
+            // Default Date (If missing, use 1st of year or skip?)
+            // We'll use 01/01/Year but mark it. 
+            // Often if date is missing, it's a "Balance Brought Forward" line.
+            if (rawSegment.includes("Balance")) continue; 
+            dateStr = `01/01/${currentYear}`;
+        }
     }
 
-    // Final Cleanup of Description
+    // 4. CLEANUP DESCRIPTION
     cleanDesc = cleanDesc
-        .replace(/^\s*[\d\.,]+\s*/, '') // Remove loose numbers at start
-        .replace(/\s+/g, ' ');          // Fix spaces
-
-    // Filter out "Opening Balance" lines
-    if (cleanDesc.toLowerCase().includes('opening balance')) continue;
+        .replace(/^\s*[\d\.,-]+\s*/, '') // Remove loose numbers/dashes at start
+        .replace(/\s+/g, ' ');           // Collapse multiple spaces
 
     transactions.push({
       date: dateStr,
       description: cleanDesc,
       amount: amount,
       balance: balance,
+      fee: fee,
       account: account,
       bankName: "FNB",
       bankLogo: "fnb",
