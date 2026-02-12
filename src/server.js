@@ -20,6 +20,11 @@ import { checkPlanAccess } from "./middleware/credits.middleware.js";
 const app = express();
 
 /* ============================
+   REQUIRED FOR RAILWAY / PROXY
+============================ */
+app.set("trust proxy", 1);
+
+/* ============================
    SECURITY MIDDLEWARE
 ============================ */
 
