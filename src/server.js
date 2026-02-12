@@ -13,7 +13,6 @@ import rateLimit from "express-rate-limit";
 import { parseStatement } from "./services/parseStatement.js";
 import pool from "./config/db.js";
 import authRoutes from "./routes/auth.routes.js";
-
 import { authenticateUser } from "./middleware/auth.middleware.js";
 import { checkPlanAccess } from "./middleware/credits.middleware.js";
 
@@ -27,55 +26,73 @@ app.set("trust proxy", 1);
 /* ============================
    SECURITY MIDDLEWARE
 ============================ */
-
-// Security headers
 app.use(helmet());
 
-// Global rate limiter (all routes)
 const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 mins
+  windowMs: 15 * 60 * 1000,
   max: 200,
   standardHeaders: true,
   legacyHeaders: false
 });
 app.use(globalLimiter);
 
+app.use(express.json());
+
 /* ============================
-   CORS (LOCKED TO FRONTEND)
+   CORS (ALLOW PROD + LOVABLE)
 ============================ */
+const allowedOrigin = process.env.FRONTEND_URL;
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL,
+  origin: function (origin, callback) {
+
+    // Allow Postman / Insomnia / non-browser
+    if (!origin) return callback(null, true);
+
+    // Allow main production frontend
+    if (origin === allowedOrigin) {
+      return callback(null, true);
+    }
+
+    // Allow any Lovable preview domains
+    if (
+      origin.endsWith(".lovable.app") ||
+      origin.endsWith(".lovableproject.com")
+    ) {
+      return callback(null, true);
+    }
+
+    return callback(new Error("Not allowed by CORS"));
+  },
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: false
 }));
 
-app.use(express.json());
-
 /* ============================
-   FILE UPLOAD LIMITS
+   FILE UPLOAD CONFIG
 ============================ */
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB limit
+    fileSize: 10 * 1024 * 1024 // 10MB
   }
 });
 
 /* ============================
-   Health Check
+   HEALTH CHECK
 ============================ */
 app.get("/", (req, res) =>
   res.send("YouScan Engine: Secure Production Active")
 );
 
 /* ============================
-   Auth Routes
+   AUTH ROUTES
 ============================ */
 app.use("/auth", authRoutes);
 
 /* ============================
-   Parse Route Rate Limiter
+   PARSE RATE LIMITER
 ============================ */
 const parseLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -154,7 +171,7 @@ app.post(
         allTransactions = [...allTransactions, ...standardized];
       }
 
-      // 🟢 CREDIT DEDUCTION AFTER SUCCESS
+      // CREDIT DEDUCTION AFTER SUCCESS
       const user = req.userRecord;
 
       if (user.plan === "free" || user.plan === "pay-as-you-go") {
@@ -191,7 +208,7 @@ app.post(
 );
 
 /* ============================
-   OZOW WEBHOOK PLACEHOLDER
+   OZOW WEBHOOK (PLACEHOLDER)
 ============================ */
 app.post("/payments/ozow-webhook", async (req, res) => {
   try {
