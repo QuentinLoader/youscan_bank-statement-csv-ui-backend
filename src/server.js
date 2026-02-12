@@ -2,7 +2,7 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-console.log("🔥 SERVER FILE VERSION: 11 Feb 21:10");
+console.log("🔥 SERVER FILE VERSION: 12 Feb - JWT Protected");
 console.log("DATABASE_URL exists:", !!process.env.DATABASE_URL);
 
 import express from "express";
@@ -12,9 +12,15 @@ import { parseStatement } from "./services/parseStatement.js";
 import pool from "./config/db.js";
 import authRoutes from "./routes/auth.routes.js";
 
+// ✅ NEW IMPORTS
+import { authenticateUser } from "./middleware/auth.middleware.js";
+import { enforceCredits } from "./middleware/credits.middleware.js";
+
 const app = express();
 
-// ✅ DB DEBUG (temporary)
+/* ============================
+   DB DEBUG (temporary)
+============================ */
 app.get("/db-debug", async (req, res) => {
   try {
     const result = await pool.query(
@@ -27,7 +33,9 @@ app.get("/db-debug", async (req, res) => {
   }
 });
 
-// NUCLEAR CORS (Dev Only)
+/* ============================
+   CORS
+============================ */
 app.use(cors({
   origin: '*', 
   methods: ['GET', 'POST', 'OPTIONS'],
@@ -40,88 +48,98 @@ app.use(express.json());
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Health Check
+/* ============================
+   Health Check
+============================ */
 app.get("/", (req, res) => 
   res.send("YouScan Engine: Global Access Active")
 );
 
-// Mount Auth
+/* ============================
+   Auth Routes
+============================ */
 app.use("/auth", authRoutes);
 
-/**
- * Main Route: Smart Unwrap Logic
- */
-app.post("/parse", upload.any(), async (req, res) => {
-  try {
-    const files = req.files || [];
-    
-    if (files.length === 0) {
-      return res.status(400).json({ error: "No files uploaded" });
-    }
-    
-    let allTransactions = [];
+/* ============================
+   PROTECTED PARSE ROUTE
+============================ */
+app.post(
+  "/parse",
+  authenticateUser,   // 🔐 Step 1: Verify JWT
+  enforceCredits,     // 💳 Step 2: Check & deduct credits
+  upload.any(),
+  async (req, res) => {
+    try {
+      const files = req.files || [];
 
-    for (const file of files) {
-      try {
-        const result = await parseStatement(file.buffer);
-
-        let rawTransactions = [];
-        let statementMetadata = {}; 
-        let detectedBankName = "FNB";
-        let detectedBankLogo = "fnb";
-
-        if (result.transactions && Array.isArray(result.transactions)) {
-          rawTransactions = result.transactions;
-          statementMetadata = result.metadata || {};
-          if (result.bankName) detectedBankName = result.bankName;
-          if (result.bankLogo) detectedBankLogo = result.bankLogo;
-        } 
-        else if (
-          result.transactions &&
-          result.transactions.transactions &&
-          Array.isArray(result.transactions.transactions)
-        ) {
-          rawTransactions = result.transactions.transactions;
-          statementMetadata = result.transactions.metadata || {};
-          if (result.bankName) detectedBankName = result.bankName;
-        }
-        else if (Array.isArray(result)) {
-          rawTransactions = result;
-        } 
-        else {
-          continue;
-        }
-
-        const standardized = rawTransactions.map(t => ({
-          ...t,
-          bankName: t.bankName || detectedBankName, 
-          bankLogo: t.bankLogo || detectedBankLogo,
-          sourceFile: file.originalname,
-          statementMetadata: {
-            openingBalance: statementMetadata.openingBalance || 0,
-            closingBalance: statementMetadata.closingBalance || 0,
-            statementId: statementMetadata.statementId || "Unknown"
-          }
-        }));
-
-        allTransactions = [...allTransactions, ...standardized];
-
-      } catch (parseError) {
-        console.error(`Parse error:`, parseError.message);
+      if (files.length === 0) {
+        return res.status(400).json({ error: "No files uploaded" });
       }
+
+      let allTransactions = [];
+
+      for (const file of files) {
+        try {
+          const result = await parseStatement(file.buffer);
+
+          let rawTransactions = [];
+          let statementMetadata = {}; 
+          let detectedBankName = "FNB";
+          let detectedBankLogo = "fnb";
+
+          if (result.transactions && Array.isArray(result.transactions)) {
+            rawTransactions = result.transactions;
+            statementMetadata = result.metadata || {};
+            if (result.bankName) detectedBankName = result.bankName;
+            if (result.bankLogo) detectedBankLogo = result.bankLogo;
+          } 
+          else if (
+            result.transactions &&
+            result.transactions.transactions &&
+            Array.isArray(result.transactions.transactions)
+          ) {
+            rawTransactions = result.transactions.transactions;
+            statementMetadata = result.transactions.metadata || {};
+            if (result.bankName) detectedBankName = result.bankName;
+          }
+          else if (Array.isArray(result)) {
+            rawTransactions = result;
+          } 
+          else {
+            continue;
+          }
+
+          const standardized = rawTransactions.map(t => ({
+            ...t,
+            bankName: t.bankName || detectedBankName,
+            bankLogo: t.bankLogo || detectedBankLogo,
+            sourceFile: file.originalname,
+            statementMetadata: {
+              openingBalance: statementMetadata.openingBalance || 0,
+              closingBalance: statementMetadata.closingBalance || 0,
+              statementId: statementMetadata.statementId || "Unknown"
+            }
+          }));
+
+          allTransactions = [...allTransactions, ...standardized];
+
+        } catch (parseError) {
+          console.error("Parse error:", parseError.message);
+        }
+      }
+
+      res.json(allTransactions);
+
+    } catch (error) {
+      console.error("Global Error:", error.message);
+      res.status(500).json({ error: "Parsing failed" });
     }
-
-    res.json(allTransactions);
-
-  } catch (error) {
-    console.error("Global Error:", error.message);
-    res.status(500).json({ error: "Parsing failed" });
   }
-});
+);
 
-/**
- * Simple Auth Gate
- */
+/* ============================
+   Simple Auth Gate (Legacy)
+============================ */
 app.post("/verify-gate", (req, res) => {
   const { code } = req.body;
 
