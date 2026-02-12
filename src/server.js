@@ -2,7 +2,7 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-console.log("🔥 SERVER FILE VERSION: Production Hardened + Billing Secured + Idempotent Webhook");
+console.log("🔥 SERVER FILE VERSION: Production Hardened + Billing Secured + Idempotent Webhook + Robust CORS");
 console.log("DATABASE_URL exists:", !!process.env.DATABASE_URL);
 
 import helmet from "helmet";
@@ -40,19 +40,23 @@ app.use(globalLimiter);
 app.use(express.json());
 
 /* ============================
-   CORS (ALLOW PROD + LOVABLE)
+   ROBUST CORS CONFIGURATION
 ============================ */
+
 const allowedOrigin = process.env.FRONTEND_URL;
 
 app.use(cors({
-  origin: function (origin, callback) {
+  origin: (origin, callback) => {
 
+    // Allow server-to-server (no origin header)
     if (!origin) return callback(null, true);
 
+    // Allow primary frontend domain
     if (origin === allowedOrigin) {
       return callback(null, true);
     }
 
+    // Allow ALL Lovable preview / project domains
     if (
       origin.endsWith(".lovable.app") ||
       origin.endsWith(".lovableproject.com")
@@ -60,12 +64,16 @@ app.use(cors({
       return callback(null, true);
     }
 
-    return callback(new Error("Not allowed by CORS"));
+    console.warn("Blocked by CORS:", origin);
+    return callback(null, false);
   },
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: false
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true
 }));
+
+// Explicit preflight handler
+app.options("*", cors());
 
 /* ============================
    FILE UPLOAD CONFIG
@@ -225,7 +233,6 @@ app.post("/payments/ozow-webhook", async (req, res) => {
 
   try {
 
-    // 🔐 SECRET VALIDATION
     if (req.query.secret !== process.env.OZOW_WEBHOOK_SECRET) {
       return res.sendStatus(403);
     }
@@ -248,7 +255,6 @@ app.post("/payments/ozow-webhook", async (req, res) => {
 
     await client.query("BEGIN");
 
-    // 🛡 IDEMPOTENCY CHECK
     const existingPayment = await client.query(
       `SELECT id FROM payments WHERE external_reference = $1`,
       [external_reference]
@@ -270,7 +276,6 @@ app.post("/payments/ozow-webhook", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // SUBSCRIPTION
     if (payment_type === "subscription") {
 
       if (amount_cents !== PRICING.PRO_MONTHLY.price_cents) {
@@ -293,7 +298,6 @@ app.post("/payments/ozow-webhook", async (req, res) => {
       );
     }
 
-    // CREDIT BUNDLE
     if (payment_type === "credit_10") {
 
       const bundle = PRICING.CREDIT_BUNDLES.CREDIT_10;
