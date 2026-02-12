@@ -14,7 +14,7 @@ import authRoutes from "./routes/auth.routes.js";
 
 // ✅ NEW IMPORTS
 import { authenticateUser } from "./middleware/auth.middleware.js";
-import { enforceCredits } from "./middleware/credits.middleware.js";
+import { checkPlanAccess } from "./middleware/credits.middleware.js";
 
 const app = express();
 
