@@ -1,7 +1,7 @@
 import pool from '../config/db.js';
 
 export async function recordExport(req, res) {
-  const userId = req.user.id;
+  const userId = req.userRecord.id;
   const ip = req.ip;
 
   const client = await pool.connect();
