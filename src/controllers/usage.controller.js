@@ -1,7 +1,12 @@
 import pool from '../config/db.js';
 
 export async function recordExport(req, res) {
-  const userId = req.userRecord.id;
+  // 🔥 FIX: Match auth middleware (req.user contains userId)
+  if (!req.user || !req.user.userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const userId = req.user.userId;
   const ip = req.ip;
 
   const client = await pool.connect();
