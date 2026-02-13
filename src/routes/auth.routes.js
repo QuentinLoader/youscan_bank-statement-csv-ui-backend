@@ -314,8 +314,12 @@ router.post("/reset-password", async (req, res) => {
 router.get("/me", authenticateUser, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT email, plan, credits_remaining,
-              subscription_expires_at, is_verified
+      `SELECT email,
+              plan,
+              credits_remaining,
+              lifetime_parses_used,
+              subscription_expires_at,
+              is_verified
        FROM users
        WHERE id = $1`,
       [req.user.userId]
@@ -330,7 +334,7 @@ router.get("/me", authenticateUser, async (req, res) => {
     res.json(user);
 
   } catch (err) {
-    console.error("ME ERROR");
+    console.error("ME ERROR", err);
     res.status(500).json({ message: "Failed to fetch user" });
   }
 });
