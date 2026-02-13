@@ -16,6 +16,9 @@ import authRoutes from "./routes/auth.routes.js";
 import { authenticateUser } from "./middleware/auth.middleware.js";
 import { checkPlanAccess } from "./middleware/credits.middleware.js";
 import { PRICING } from "./config/pricing.js";
+import pricingRoutes from "./routes/pricing.routes.js";
+app.use("/pricing", pricingRoutes);
+
 
 const app = express();
 
