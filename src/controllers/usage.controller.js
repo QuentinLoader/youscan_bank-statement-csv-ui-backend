@@ -24,34 +24,35 @@ export async function recordExport(req, res) {
 
     const user = userResult.rows[0];
 
-    // FREE PLAN
+    /**
+     * FREE PLAN — Atomic update
+     */
     if (user.plan === 'free') {
-      const FREE_LIMIT = 15; // must match pricing config
-
-      if (user.lifetime_parses_used >= FREE_LIMIT) {
-        await client.query('ROLLBACK');
-        return res.status(403).json({ code: 'FREE_LIMIT_REACHED' });
-      }
-
-      await client.query(
-        `UPDATE users
-         SET lifetime_parses_used = lifetime_parses_used + 1
-         WHERE id = $1`,
-        [userId]
-      );
-    }
-
-    // PAY-AS-YOU-GO
-    if (user.plan === 'pay-as-you-go') {
-      if (user.credits_remaining <= 0) {
-        await client.query('ROLLBACK');
-        return res.status(403).json({ code: 'NO_CREDITS' });
-      }
+      const FREE_LIMIT = 15;
 
       const updateResult = await client.query(
         `UPDATE users
+         SET lifetime_parses_used = lifetime_parses_used + 1
+         WHERE id = $1
+           AND lifetime_parses_used < $2`,
+        [userId, FREE_LIMIT]
+      );
+
+      if (updateResult.rowCount === 0) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ code: 'FREE_LIMIT_REACHED' });
+      }
+    }
+
+    /**
+     * PAY-AS-YOU-GO PLAN — Atomic decrement
+     */
+    if (user.plan === 'pay-as-you-go') {
+      const updateResult = await client.query(
+        `UPDATE users
          SET credits_remaining = credits_remaining - 1
-         WHERE id = $1 AND credits_remaining > 0`,
+         WHERE id = $1
+           AND credits_remaining > 0`,
         [userId]
       );
 
@@ -67,7 +68,9 @@ export async function recordExport(req, res) {
       );
     }
 
-    // PRO PLAN
+    /**
+     * PRO PLAN — Expiry check
+     */
     if (user.plan === 'pro') {
       if (
         !user.subscription_expires_at ||
@@ -78,7 +81,9 @@ export async function recordExport(req, res) {
       }
     }
 
-    // Log usage
+    /**
+     * Usage log
+     */
     await client.query(
       `INSERT INTO usage_logs (user_id, action, ip_address)
        VALUES ($1, 'export_csv', $2)`,
