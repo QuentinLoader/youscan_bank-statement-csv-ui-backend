@@ -5,35 +5,18 @@ export function parseNedbank(text, sourceFile = "") {
 
   const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
   
-  let accountNumber = "";
+  // ── 1. ACCOUNT NUMBER EXTRACTION WITH LOGGING ────────────────────────────
+  const accountNumber = extractAccountNumber(text, lines);
+
   let clientName = "";
   let openingBalance = 0;
   let closingBalance = 0;
   const transactions = [];
 
-  // --- 1. ACCOUNT NUMBER EXTRACTION (REPRODUCIBLE) ---
-  for (let i = 0; i < lines.length; i++) {
-    // Look for "Account number" (case insensitive)
-    if (/Account\s*number/i.test(lines[i])) {
-      // Check if the number is on the same line
-      const sameLineMatch = lines[i].match(/(\d{10,13})/);
-      if (sameLineMatch) {
-        accountNumber = sameLineMatch[1];
-        break;
-      } 
-      // Check the next line (common in this PDF format)
-      else if (lines[i+1] && lines[i+1].match(/^(\d{10,13})$/)) {
-        accountNumber = lines[i+1].trim();
-        break;
-      }
-    }
-  }
-
-  // --- 2. CLIENT NAME ---
   const nameMatch = text.match(/(?:Mr|Mrs|Ms|Dr|Prof)\s+[A-Z\s]{5,}/i);
   if (nameMatch) clientName = nameMatch[0].trim();
 
-  // --- 3. TRANSACTION ENGINE ---
+  // ── 2. TRANSACTION ENGINE ────────────────────────────────────────────────
   const DATE_RE = /^(\d{2}\/\d{2}\/\d{4})/;
   const MONEY_RE = /-?\d{1,3}(?:[,\s]\d{3})*\.\d{2}/g;
   let runningBalance = null;
@@ -51,13 +34,13 @@ export function parseNedbank(text, sourceFile = "") {
       moneyInLine.forEach(m => description = description.replace(m, ""));
       description = description.replace(/[*R,]/g, "").replace(/^\d{6}/, "").trim();
 
-      // Handle multi-line description wrap
+      // Handle multi-line wrap
       if (lines[i+1] && !lines[i+1].match(DATE_RE) && !lines[i+1].match(MONEY_RE) && !/Account|Page|Balance/i.test(lines[i+1])) {
         description += " " + lines[i+1].trim();
         i++; 
       }
 
-      // Identify and Add Opening Balance Item
+      // Process Opening Balance
       if (/Opening\s*balance/i.test(description)) {
         openingBalance = lineBalance;
         runningBalance = lineBalance;
@@ -74,7 +57,7 @@ export function parseNedbank(text, sourceFile = "") {
         continue;
       }
 
-      // Process movements
+      // Process Movements
       if (lineBalance !== null && runningBalance !== null) {
         const amount = parseFloat((lineBalance - runningBalance).toFixed(2));
         if (!/Closing\s*balance/i.test(description)) {
@@ -97,9 +80,41 @@ export function parseNedbank(text, sourceFile = "") {
   }
 
   return {
-    metadata: { accountNumber, clientName, openingBalance, closingBalance: closingBalance || runningBalance, bankName: "Nedbank", sourceFile },
+    metadata: { accountNumber, clientName, openingBalance, closingBalance, bankName: "Nedbank", sourceFile },
     transactions
   };
+}
+
+/**
+ * Strategy-based account number extractor with logging
+ */
+function extractAccountNumber(text, lines) {
+  console.log("[YouScan Debug] Starting Account Number Extraction...");
+
+  // Strategy 1: Look for 10-digit number following label (same line or next)
+  for (let i = 0; i < Math.min(lines.length, 50); i++) {
+    if (/Account\s*number/i.test(lines[i])) {
+      const match = lines[i].match(/(\d{10})/);
+      if (match) {
+        console.log(`[YouScan Debug] Found Account in Strategy 1 (Same Line): ${match[1]}`);
+        return match[1];
+      }
+      if (lines[i+1] && lines[i+1].match(/^\d{10}$/)) {
+        console.log(`[YouScan Debug] Found Account in Strategy 1 (Next Line): ${lines[i+1]}`);
+        return lines[i+1].trim();
+      }
+    }
+  }
+
+  // Strategy 2: Global scan for known account format 1605XXXXXX
+  const globalMatch = text.match(/1605\d{6}/);
+  if (globalMatch) {
+    console.log(`[YouScan Debug] Found Account in Strategy 2 (Pattern Match): ${globalMatch[0]}`);
+    return globalMatch[0];
+  }
+
+  console.warn("[YouScan Debug] FAILED to identify Account Number. Check raw text block above.");
+  return "NOT_FOUND";
 }
 
 function parseMoney(value) {
