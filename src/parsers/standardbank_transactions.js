@@ -5,77 +5,56 @@ export function parseStandardBank(text, sourceFile = "") {
 
   const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
   
-  // ── 1. ACCOUNT & METADATA (High-Priority Search) ────────────────────────
+  // ── 1. ACCOUNT & METADATA ──────────────────────────────────────────────
   const accountNumber = text.match(/Account\s*number\s*(\d{11})/i)?.[1] || "10188688439";
   const clientName = "MALL AT CARNIVAL";
   
-  // Ignore the '08 January 2026' header date for transactions
-  const yearMatch = text.match(/\b202\d\b/);
-  const statementYear = yearMatch ? yearMatch[0] : "2026";
+  // Extract year from header: "08 January 2026"
+  const yearMatch = text.match(/\d{2}\s+\w+\s+(20\d{2})/);
+  const statementYear = yearMatch ? yearMatch[1] : "2026";
 
   let openingBalance = 0;
   let runningBalance = null;
   const transactions = [];
 
-  const months = { 
-    Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06",
-    Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12"
-  };
-
-  // ── 2. TRANSACTION ENGINE (Deep Scan Strategy) ──────────────────────────
+  // ── 2. TRANSACTION ENGINE (Numeric Date Strategy) ──────────────────────
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    // Detect Opening Balance
-    if (/Balance\s*Brought\s*Forward/i.test(line)) {
+    // Identify Opening Balance
+    if (/Balance\s*Brought\s*Forward/i.test(line) || /Month-end\s*Balance/i.test(line)) {
       const money = line.match(/-?[\d\s,]+\.\d{2}-?/g);
       if (money) {
         openingBalance = parseStandardMoney(money[money.length - 1]);
         runningBalance = openingBalance;
-        
-        transactions.push({
-          date: `01/01/${statementYear}`,
-          description: "OPENING BALANCE",
-          amount: 0,
-          balance: openingBalance,
-          account: accountNumber,
-          clientName,
-          bankName: "Standard Bank",
-          sourceFile
-        });
         continue;
       }
     }
 
-    // NEW LOGIC: Look for any line containing a balance (usually ends in .00 or .00-)
-    const moneyMatches = line.match(/-?[\d\s,]+\.\d{2}-?/g);
+    // Pattern for the "Jammed" lines: MM DD then Amount (e.g., "01 022,811.42-")
+    // This matches: (Month 01-12) (Day 01-31) (Balance/Amount)
+    const jamMatch = line.match(/^(0[1-9]|1[0-2])\s+([0-2][0-9]|3[01])\s?([\d\s,]+\.\d{2}-?)/);
     
-    // We only process if there is a money value AND it's not the header/footer
-    if (moneyMatches && !/Customer Care|VAT Reg|PO BOX/i.test(line)) {
+    if (jamMatch) {
+      const month = jamMatch[1];
+      const day = jamMatch[2];
+      const date = `${day}/${month}/${statementYear}`;
+      const lineBalance = parseStandardMoney(jamMatch[3]);
+
+      // Description is usually the text on the line BEFORE this numeric row
+      let description = (lines[i-1] && !lines[i-1].includes('.')) ? lines[i-1] : "TRANSACTION";
       
-      // Look for a date (DD MMM) anywhere in this line or the previous one
-      const dateMatch = line.match(/(\d{2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/i) || 
-                        (lines[i-1] ? lines[i-1].match(/(\d{2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/i) : null);
+      // Cleanup description artifacts
+      description = description.replace(/Customer Care|MALL AT CARNIVAL|VAT Reg/gi, "").trim();
 
-      if (dateMatch) {
-        const date = `${dateMatch[1]}/${months[dateMatch[2]]}/${statementYear}`;
-        const lineBalance = parseStandardMoney(moneyMatches[moneyMatches.length - 1]);
-        
-        // Clean description
-        let description = line;
-        moneyMatches.forEach(m => description = description.replace(m, ""));
-        description = description.replace(dateMatch[0], "").trim();
+      if (runningBalance !== null) {
+        const amount = parseFloat((lineBalance - runningBalance).toFixed(2));
 
-        let amount = 0;
-        if (runningBalance !== null) {
-          amount = parseFloat((lineBalance - runningBalance).toFixed(2));
-        }
-
-        // Avoid adding the same line twice if the date was on the previous line
-        if (description.length > 2 && !/Opening\s*Balance|Brought\s*Forward/i.test(description)) {
+        // Filter out summary/VAT totals to keep CSV clean
+        if (!/Total|Balance\s*outstanding/i.test(line)) {
           transactions.push({
             date,
-            description: description.toUpperCase(),
+            description: description.toUpperCase() || "BANK TRANSACTION",
             amount,
             balance: lineBalance,
             account: accountNumber,
@@ -85,10 +64,22 @@ export function parseStandardBank(text, sourceFile = "") {
           });
           runningBalance = lineBalance;
         }
-      } else {
-        console.log(`[YouScan Debug] Found money but no date on line: "${line}"`);
       }
     }
+  }
+
+  // Ensure Opening Balance is the first item if found
+  if (openingBalance !== null && transactions.length > 0) {
+     transactions.unshift({
+        date: `01/01/${statementYear}`,
+        description: "OPENING BALANCE",
+        amount: 0,
+        balance: openingBalance,
+        account: accountNumber,
+        clientName,
+        bankName: "Standard Bank",
+        sourceFile
+     });
   }
 
   return {
@@ -99,6 +90,7 @@ export function parseStandardBank(text, sourceFile = "") {
 
 function parseStandardMoney(val) {
   if (!val) return 0;
+  // Standard Bank quirk: Removing spaces between thousands (e.g., "12 081" -> "12081")
   let clean = val.replace(/[R\s,]/g, "");
   if (clean.endsWith("-")) clean = "-" + clean.replace("-", "");
   return parseFloat(clean);
