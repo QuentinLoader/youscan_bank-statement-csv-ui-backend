@@ -5,29 +5,31 @@ export function parseStandardBank(text, sourceFile = "") {
 
   const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
   
+  // 1. Metadata Extraction
   const accountNumber = text.match(/Account\s*number\s*(\d{11})/i)?.[1] || "10188688439";
   const clientName = "MALL AT CARNIVAL";
-  const yearMatch = text.match(/\b202\d\b/);
-  const statementYear = yearMatch ? yearMatch[0] : "2026";
+  const yearMatch = text.match(/\d{2}\s+\w+\s+(20\d{2})/);
+  const statementYear = yearMatch ? yearMatch[1] : "2026";
 
   let openingBalance = 0;
   let runningBalance = null;
   const transactions = [];
 
+  // 2. Transaction Engine
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    // Anchor Opening Balance
+    // Detect Opening Balance Anchor
     if (/Balance\s*Brought\s*Forward|Month-end\s*Balance/i.test(line)) {
       const moneyMatches = line.match(/-?[\d\s,]+\.\d{2}-?/g);
       if (moneyMatches) {
-        openingBalance = parseStandardMoney(moneyMatches[moneyMatches.length - 1]);
+        openingBalance = parseCleanMoney(moneyMatches[moneyMatches.length - 1]);
         runningBalance = openingBalance;
         continue;
       }
     }
 
-    // MM DD Numeric Date Pattern
+    // Match Numeric Date: MM DD
     const dateMatch = line.match(/(0[1-9]|1[0-2])\s+([0-2][0-9]|3[01])/);
     
     if (dateMatch) {
@@ -35,25 +37,27 @@ export function parseStandardBank(text, sourceFile = "") {
       const moneyMatches = line.match(/-?[\d\s,]+\.\d{2}-?/g) || [];
       
       if (moneyMatches.length > 0) {
-        // We take the LAST money match as the balance anchor
-        const lineBalance = parseStandardMoney(moneyMatches[moneyMatches.length - 1]);
+        // Balance is the last number. We sanitize it to remove jammed prefix digits.
+        const lineBalance = parseCleanMoney(moneyMatches[moneyMatches.length - 1]);
         
+        // Grab Description from the line above
         let description = (lines[i-1] && !lines[i-1].includes('.')) ? lines[i-1] : "TRANSACTION";
         description = description.replace(/Customer Care|VAT Reg|PO BOX|MALL AT/gi, "").trim();
 
         if (runningBalance !== null) {
+          // Calculate amount via delta to ensure math integrity
           const amount = parseFloat((lineBalance - runningBalance).toFixed(2));
 
           if (!/Total|outstanding|Balance\s*at/i.test(line) && Math.abs(amount) > 0) {
             transactions.push({
-              date,
-              description: description.toUpperCase(),
-              amount,
-              balance: lineBalance,
-              account: accountNumber,
-              clientName,
-              bankName: "Standard Bank",
-              sourceFile
+              Date: date, // Standardized Heading
+              Description: description.toUpperCase(),
+              Amount: amount,
+              Balance: lineBalance,
+              Account: accountNumber,
+              "Client Name": clientName,
+              "Bank Name": "Standard Bank",
+              "Source File": sourceFile
             });
             runningBalance = lineBalance;
           }
@@ -62,16 +66,17 @@ export function parseStandardBank(text, sourceFile = "") {
     }
   }
 
+  // Prepend Opening Balance for CSV consistency
   if (openingBalance !== null) {
     transactions.unshift({
-      date: `01/01/${statementYear}`,
-      description: "OPENING BALANCE",
-      amount: 0,
-      balance: openingBalance,
-      account: accountNumber,
-      clientName,
-      bankName: "Standard Bank",
-      sourceFile
+      Date: `01/01/${statementYear}`,
+      Description: "OPENING BALANCE",
+      Amount: 0.00,
+      Balance: openingBalance,
+      Account: accountNumber,
+      "Client Name": clientName,
+      "Bank Name": "Standard Bank",
+      "Source File": sourceFile
     });
   }
 
@@ -79,23 +84,21 @@ export function parseStandardBank(text, sourceFile = "") {
 }
 
 /**
- * Enhanced Money Parser for Jammed Business Statements
- * Specifically handles the "Leading Sequence Number" artifact
+ * Robust Money Parser
+ * Fixes decimal drift by isolating the balance from jammed text artifacts
  */
-function parseStandardMoney(val) {
+function parseCleanMoney(val) {
   if (!val) return 0;
   
-  // 1. Remove currency/spaces/commas
+  // Strip spaces, commas, and currency
   let clean = val.replace(/[R\s,]/g, "");
   const isNegative = clean.endsWith("-") || clean.startsWith("-");
   clean = clean.replace("-", "");
 
-  // 2. REPEATABILITY FIX: 
-  // If the number is unnaturally long (e.g. 12121315.68), it has a sequence prefix.
-  // We identify the decimal point and keep only the digits belonging to the balance.
+  // If the number is jammed (e.g., 12121315.68), keep only valid balance length
   if (clean.includes(".") && clean.length > 9) {
      const parts = clean.split(".");
-     // Keep the 2 decimals and the 6-7 digits preceding the dot
+     // Slice to keep only 7 digits before the decimal (up to R9,999,999.99)
      clean = parts[0].slice(-7) + "." + parts[1];
   }
 
