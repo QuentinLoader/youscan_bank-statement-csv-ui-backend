@@ -3,72 +3,101 @@
  * Strategy: Money-first + balance-driven correction (FNB style)
  */
 
+import { extractStandardBankMetadata } from "./standardbank_metadata.js";
+
 export const parseStandardBank = (text) => {
+  const metadata = extractStandardBankMetadata(text);
   const transactions = [];
 
-  const parseNum = (val) => {
-    if (!val) return 0;
-    let clean = val.replace(/[\s,]/g, '');
-    let isNeg = clean.endsWith('-');
-    clean = clean.replace(/[^0-9.]/g, '');
-    const num = parseFloat(clean) || 0;
-    return isNeg ? -Math.abs(num) : Math.abs(num);
-  };
+  const lines = text.split("\n");
 
-  const accountMatch = text.match(/Account Number\s+([\d\s]+)/i);
-  const account = accountMatch ? accountMatch[1].replace(/\s/g, '') : "Unknown";
+  let inTable = false;
+  let runningBalance = metadata.openingBalance;
+  let totalCredits = 0;
+  let totalDebits = 0;
+  let currentDescription = "";
 
-  const periodMatch = text.match(/Statement from .*? (\d{4})/);
-  const year = periodMatch ? periodMatch[1] : new Date().getFullYear();
+  for (let rawLine of lines) {
+    const line = rawLine.trim();
 
-  const openMatch = text.match(/BALANCE BROUGHT FORWARD.*?([\d,.-]+)/i);
-  const openingBalance = openMatch ? parseNum(openMatch[1]) : 0;
-
-  const closeMatch = text.match(/Balance outstanding.*?([\d,.-]+)/i);
-  const closingBalance = closeMatch ? parseNum(closeMatch[1]) : 0;
-
-  const moneyRegex = /(.+?)\s+([\d,.\-]+)\s+(\d{2})\s+(\d{2})\s+([\d,.\-]+)/g;
-
-  let match;
-  let runningBalance = openingBalance;
-
-  while ((match = moneyRegex.exec(text)) !== null) {
-    let description = match[1].trim();
-    const amount = parseNum(match[2]);
-    const month = match[3].padStart(2, '0');
-    const day = match[4].padStart(2, '0');
-    const balance = parseNum(match[5]);
-
-    if (description.toLowerCase().includes("balance brought forward"))
+    if (line.includes("Details Service")) {
+      inTable = true;
       continue;
-
-    const formattedDate = `${day}/${month}/${year}`;
-
-    const expectedDiff = balance - runningBalance;
-    let finalAmount = amount;
-
-    if (Math.abs(expectedDiff - amount) > 0.05) {
-      finalAmount = expectedDiff;
     }
+
+    if (!inTable) continue;
+    if (line.includes("VAT Summary")) break;
+    if (line.length < 5) continue;
+
+    // Match: Description Debits/Credits Date Balance
+    const match = line.match(
+      /(.+?)\s+([\d,]+\.\d{2}-?)?\s+(\d{2})\s+(\d{2})\s+([\d,]+\.\d{2}-?)/
+    );
+
+    if (!match) {
+      // Handle multi-line continuation
+      currentDescription += " " + line;
+      continue;
+    }
+
+    let description = (currentDescription + " " + match[1]).trim();
+    currentDescription = "";
+
+    const month = match[3];
+    const day = match[4];
+    const year = metadata.periodStart
+      ? metadata.periodStart.slice(-4)
+      : new Date().getFullYear();
+
+    const date = `${day}/${month}/${year}`;
+
+    const amountRaw = match[2] || "";
+    const balanceRaw = match[5];
+
+    const balance = parseFloat(balanceRaw.replace(/[, -]/g, "")) *
+      (balanceRaw.includes("-") ? -1 : 1);
+
+    let amount = 0;
+
+    if (amountRaw) {
+      amount =
+        parseFloat(amountRaw.replace(/[, -]/g, "")) *
+        (amountRaw.includes("-") ? -1 : 1);
+    } else {
+      // fallback via reconciliation
+      amount = balance - runningBalance;
+    }
+
+    if (amount > 0) totalCredits += amount;
+    else totalDebits += Math.abs(amount);
 
     runningBalance = balance;
 
     transactions.push({
-      date: formattedDate,
-      description,
-      amount: finalAmount,
+      date,
+      description: description.trim(),
+      amount,
       balance,
-      account,
-      bankName: "Standard Bank"
+      account: metadata.account,
+      clientName: metadata.clientName,
+      statementId: metadata.statementDate,
+      bankName: metadata.bankName
     });
   }
 
+  const calculatedClosing =
+    metadata.openingBalance + totalCredits - totalDebits;
+
+  const reconciliationOk =
+    Math.abs(calculatedClosing - metadata.closingBalance) < 0.02;
+
   return {
     metadata: {
-      accountNumber: account,
-      openingBalance,
-      closingBalance,
-      bankName: "Standard Bank"
+      ...metadata,
+      totalCredits,
+      totalDebits,
+      reconciliationOk,
+      transactionCount: transactions.length
     },
     transactions
   };
