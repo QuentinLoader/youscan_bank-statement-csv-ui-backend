@@ -1,49 +1,91 @@
 // src/parsers/nedbank_transactions.js
 
 export function parseNedbank(text) {
-  if (!text || typeof text !== "string") {
-    return [];
-  }
+  if (!text || typeof text !== "string") return [];
 
   const lines = text
     .split("\n")
-    .map(line => line.trim())
+    .map(l => l.trim())
     .filter(Boolean);
 
   const transactions = [];
 
-  // Accept YYYY-MM-DD OR DD/MM/YYYY
-  const dateRegex = /^(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4})/;
+  let openingBalance = null;
+  let closingBalance = null;
+
+  const dateRegex = /^\d{2}\/\d{2}\/\d{4}/;
 
   for (const line of lines) {
     if (!dateRegex.test(line)) continue;
 
-    // Split on 2+ spaces or tabs
-    const parts = line.split(/\s{2,}|\t/);
+    // Split on 2+ spaces
+    const parts = line.split(/\s{2,}/);
 
     if (parts.length < 2) continue;
 
     const date = parts[0];
-    const amountRaw = parts[parts.length - 1];
+    const description = parts[1] || "";
 
-    const amount = parseFloat(
-      amountRaw
-        .replace(/,/g, "")
-        .replace(/[^\d.-]/g, "")
-    );
+    // Opening balance row
+    if (description.toLowerCase().includes("opening balance")) {
+      const balance = extractLastNumber(parts);
+      openingBalance = balance;
+      continue;
+    }
 
-    if (isNaN(amount)) continue;
+    // Extract debit / credit
+    const numbers = parts
+      .map(p => cleanNumber(p))
+      .filter(n => n !== null);
 
-    const description = parts.slice(1, -1).join(" ").trim();
+    if (numbers.length === 0) continue;
+
+    const balance = numbers[numbers.length - 1];
+
+    // Detect amount (second last number)
+    let amount = null;
+    if (numbers.length >= 2) {
+      amount = numbers[numbers.length - 2];
+    }
+
+    if (amount === null) continue;
 
     transactions.push({
       date,
       description,
       amount,
+      balance
     });
   }
 
-  console.log("Nedbank transactions parsed:", transactions.length);
+  if (transactions.length > 0) {
+    closingBalance = transactions[transactions.length - 1].balance;
+  }
 
-  return transactions;
+  console.log("Nedbank parsed:", transactions.length);
+  console.log("Opening:", openingBalance);
+  console.log("Closing:", closingBalance);
+
+  return {
+    metadata: {
+      openingBalance,
+      closingBalance
+    },
+    transactions
+  };
+}
+
+function cleanNumber(value) {
+  const num = parseFloat(
+    value.replace(/,/g, "").replace(/[^\d.-]/g, "")
+  );
+  return isNaN(num) ? null : num;
+}
+
+function extractLastNumber(parts) {
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const num = cleanNumber(parts[i]);
+    if (num !== null) return num;
+  }
+  return null;
 }
