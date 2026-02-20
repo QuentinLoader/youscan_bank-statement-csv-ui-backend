@@ -1,7 +1,11 @@
 // src/parsers/nedbank_transactions.js
 
+// src/parsers/nedbank_transactions.js
+
 export function parseNedbank(text) {
-  if (!text || typeof text !== "string") return { metadata: {}, transactions: [] };
+  if (!text || typeof text !== "string") {
+    return { metadata: {}, transactions: [] };
+  }
 
   const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
 
@@ -9,51 +13,50 @@ export function parseNedbank(text) {
   let openingBalance = null;
   let closingBalance = null;
 
-  const dateLineRegex = /^(\d{2}\/\d{2}\/\d{4})\s+(.*)$/;
+  const dateRegex = /^\d{2}\/\d{2}\/\d{4}/;
   const moneyRegex = /-?\d{1,3}(?:,\d{3})*(?:\.\d{2})/g;
 
   for (const line of lines) {
-    const dateMatch = line.match(dateLineRegex);
-    if (!dateMatch) continue;
 
-    const date = dateMatch[1];
-    const rest = dateMatch[2];
+    if (!dateRegex.test(line)) continue;
 
     // Opening balance
-    if (rest.toLowerCase().includes("opening balance")) {
-      const money = rest.match(moneyRegex);
+    if (line.toLowerCase().includes("opening balance")) {
+      const money = line.match(moneyRegex);
       if (money) {
         openingBalance = parseMoney(money[money.length - 1]);
       }
       continue;
     }
 
-    const moneyMatches = rest.match(moneyRegex);
-    if (!moneyMatches || moneyMatches.length < 1) continue;
+    const moneyMatches = line.match(moneyRegex);
+    if (!moneyMatches || moneyMatches.length < 2) continue;
 
-    // Last number = balance
     const balance = parseMoney(moneyMatches[moneyMatches.length - 1]);
+    const amount  = parseMoney(moneyMatches[moneyMatches.length - 2]);
 
-    // Second last number = transaction amount (if exists)
-    let amount = null;
-    if (moneyMatches.length >= 2) {
-      amount = parseMoney(moneyMatches[moneyMatches.length - 2]);
-    } else {
-      continue;
-    }
+    // Remove last two money values from description safely
+    let description = line;
 
-    // Remove trailing money values from description
-    const description = rest.replace(moneyRegex, "").replace(/\*/g, "").trim();
+    description = description.replace(dateRegex, "").trim();
+
+    // remove last two amounts from end
+    description = description.replace(
+      new RegExp(`${moneyMatches[moneyMatches.length - 2]}\\s*\\*?\\s*${moneyMatches[moneyMatches.length - 1]}$`),
+      ""
+    );
+
+    description = description.trim();
 
     transactions.push({
-      date,
+      date: line.match(dateRegex)[0],
       description,
       amount,
       balance
     });
   }
 
-  // Closing balance from final line
+  // Closing balance
   const closingMatch = text.match(/Closing balance\s+(-?\d{1,3}(?:,\d{3})*(?:\.\d{2}))/);
   if (closingMatch) {
     closingBalance = parseMoney(closingMatch[1]);
