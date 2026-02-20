@@ -1,9 +1,21 @@
 /**
- * Capitec Parser - Production Safe (Simplified Model + Metadata)
- * Adds:
- * - clientName
- * - statementId (Unique Document No)
- * - dynamic opening balance
+ * Capitec Parser - Production Safe (Simplified Model + Full Metadata)
+ *
+ * Returns:
+ * {
+ *   metadata: {
+ *     accountNumber,
+ *     clientName,
+ *     statementId,
+ *     openingBalance,
+ *     closingBalance,
+ *     transactionCount,
+ *     bankName
+ *   },
+ *   transactions: [
+ *     { date, description, amount, balance, account, clientName, statementId, bankName }
+ *   ]
+ * }
  */
 
 export const parseCapitec = (text) => {
@@ -19,24 +31,35 @@ export const parseCapitec = (text) => {
   };
 
   // ------------------------------------------------------------------
-  // 1️⃣ Metadata Extraction
+  // 1️⃣ METADATA EXTRACTION
   // ------------------------------------------------------------------
 
-  // Account
+  // Account Number (handles newline layout)
   let account = "Unknown";
-  const accountBlockMatch = text.match(/Account\s*\n\s*(\d{10,})/i);
-  if (accountBlockMatch) {
-    account = accountBlockMatch[1];
+  const accountMatch = text.match(/Account\s*\n\s*(\d{10,})/i);
+  if (accountMatch) {
+    account = accountMatch[1];
   } else {
-    const fallbackMatch = text.match(/\b\d{10,11}\b/);
-    if (fallbackMatch) account = fallbackMatch[0];
+    const fallbackAccount = text.match(/\b\d{10,11}\b/);
+    if (fallbackAccount) account = fallbackAccount[0];
   }
 
-  // Client Name (usually MR/MRS/MS etc in caps)
+  // Client Name (anchored to Main Account Statement block)
   let clientName = "Unknown";
-  const nameMatch = text.match(/\b(MR|MRS|MS|DR)\s+[A-Z\s]+/);
-  if (nameMatch) {
-    clientName = nameMatch[0].trim();
+
+  const anchoredNameMatch = text.match(
+    /Main Account Statement\s*\n\s*(MR|MRS|MS|DR)\s+[A-Z\s]+/i
+  );
+
+  if (anchoredNameMatch) {
+    clientName = anchoredNameMatch[0]
+      .replace(/Main Account Statement/i, "")
+      .trim();
+  } else {
+    const fallbackName = text.match(/\b(MR|MRS|MS|DR)\s+[A-Z]+\s+[A-Z]+/);
+    if (fallbackName) {
+      clientName = fallbackName[0].trim();
+    }
   }
 
   // Statement ID (Unique Document No)
@@ -47,7 +70,7 @@ export const parseCapitec = (text) => {
   }
 
   // ------------------------------------------------------------------
-  // 2️⃣ Isolate Transaction History
+  // 2️⃣ ISOLATE TRANSACTION HISTORY SECTION
   // ------------------------------------------------------------------
 
   const startIndex = text.indexOf("Transaction History");
@@ -76,7 +99,7 @@ export const parseCapitec = (text) => {
     .filter(Boolean);
 
   // ------------------------------------------------------------------
-  // 3️⃣ Reconstruct Multi-line Rows
+  // 3️⃣ RECONSTRUCT MULTI-LINE ROWS
   // ------------------------------------------------------------------
 
   const reconstructed = [];
@@ -99,7 +122,7 @@ export const parseCapitec = (text) => {
   );
 
   // ------------------------------------------------------------------
-  // 4️⃣ Parse Rows
+  // 4️⃣ PARSE ROWS (BALANCE-DRIVEN)
   // ------------------------------------------------------------------
 
   let runningBalance = null;
@@ -133,6 +156,7 @@ export const parseCapitec = (text) => {
       runningBalance = balance;
     }
 
+    // Clean description
     numbers.forEach(n => {
       body = body.replace(n, '');
     });
