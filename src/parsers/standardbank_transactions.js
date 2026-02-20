@@ -6,66 +6,64 @@ export function parseStandardBank(text, sourceFile = "") {
   const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
   
   // ── 1. ACCOUNT & METADATA ──────────────────────────────────────────────
-  // Identifies the 11-digit account number found on page 1
-  const accountNumber = text.match(/Account\s*number\s*(\d{11})/i)?.[1] || "10188688439";
-  const clientName = text.match(/^[A-Z\s]{5,}/m)?.[0]?.trim() || "";
+  // Targets the 11-digit account number (e.g., 10188688439)
+  const accountNumber = text.match(/Account\s*number\s*(\d{10,13})/i)?.[1] || "NOT_FOUND";
+  const clientName = text.match(/MALL\s+AT\s+CARNIVAL/i)?.[0] || "CLIENT_NOT_FOUND";
   
-  // Captures the year from the "Statement Period" header
-  const yearMatch = text.match(/Period\s+\d{2}\s+\w+\s+(20\d{2})/i);
-  const statementYear = yearMatch ? yearMatch[1] : "2025";
+  // Year extraction from the header "08 January 2026"
+  const yearMatch = text.match(/\d{2}\s+\w+\s+(20\d{2})/);
+  const statementYear = yearMatch ? yearMatch[1] : "2026";
 
   let openingBalance = 0;
   let runningBalance = null;
   const transactions = [];
 
   const months = { Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06",
-                   Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12" };
+                   Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12",
+                   January: "01", February: "02", March: "03", April: "04", May: "05", June: "06",
+                   July: "07", August: "08", September: "09", October: "10", November: "11", December: "12" };
 
-  // ── 2. EXTRACTION LOOP ──────────────────────────────────────────────────
+  // ── 2. TRANSACTION ENGINE ────────────────────────────────────────────────
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    // Anchor: Opening Balance
-    if (/Balance\s*Brought\s*Forward/i.test(line)) {
+    // Anchor: Balance Brought Forward (Opening)
+    if (/Balance\s*Brought\s*Forward/i.test(line) || /Opening\s*Balance/i.test(line)) {
       const money = line.match(/-?[\d\s,]+\.\d{2}-?/g);
       if (money) {
         openingBalance = parseStandardMoney(money[money.length - 1]);
         runningBalance = openingBalance;
-        
-        transactions.push({
-          date: `01/07/${statementYear}`, // Anchored to statement start
-          description: "OPENING BALANCE",
-          amount: 0,
-          balance: openingBalance,
-          account: accountNumber,
-          clientName,
-          bankName: "Standard Bank",
-          sourceFile
-        });
+        console.log(`[YouScan] Captured Opening Balance: ${openingBalance}`);
+        continue; 
       }
-      continue;
     }
 
-    // Pattern: DD MMM (e.g., "01 Jul")
+    // Pattern: DD MMM (e.g., "02 Jan")
     const dateMatch = line.match(/^(\d{2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/i);
     
     if (dateMatch) {
-      const date = `${dateMatch[1]}/${months[dateMatch[2]]}/${statementYear}`;
+      const day = dateMatch[1];
+      const monthStr = dateMatch[2];
+      const date = `${day}/${months[monthStr]}/${statementYear}`;
+      
+      // Money check for Standard Bank trailing minus (e.g., 500.00-)
       const moneyMatches = line.match(/-?[\d\s,]+\.\d{2}-?/g) || [];
       
       if (moneyMatches.length > 0) {
+        // Balance is always the last money value on the line
         const lineBalance = parseStandardMoney(moneyMatches[moneyMatches.length - 1]);
         
         let description = line.replace(dateMatch[0], "");
         moneyMatches.forEach(m => description = description.replace(m, ""));
         description = description.trim();
 
-        // Handle multi-line description wrap (Standard Bank often wraps to next line)
+        // Handle Wrapped Description (Common in Business Statements)
         if (lines[i+1] && !lines[i+1].match(/^\d{2}\s+\w+/) && !lines[i+1].match(/\.\d{2}/)) {
           description += " " + lines[i+1];
           i++; 
         }
 
+        // Calculate Amount (Delta)
         let amount = 0;
         if (runningBalance !== null) {
           amount = parseFloat((lineBalance - runningBalance).toFixed(2));
@@ -73,7 +71,7 @@ export function parseStandardBank(text, sourceFile = "") {
 
         transactions.push({
           date,
-          description: description.toUpperCase(),
+          description: description.toUpperCase().replace(/\s+/g, ' '),
           amount,
           balance: lineBalance,
           account: accountNumber,
@@ -95,8 +93,8 @@ export function parseStandardBank(text, sourceFile = "") {
 
 function parseStandardMoney(val) {
   if (!val) return 0;
-  // Standard Bank quirk: negative sign often follows the number (100.00-)
   let clean = val.replace(/[R\s,]/g, "");
+  // Fixes trailing minus: "100.00-" -> "-100.00"
   if (clean.endsWith("-")) {
     clean = "-" + clean.replace("-", "");
   }
