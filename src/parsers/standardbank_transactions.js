@@ -5,12 +5,8 @@ export function parseStandardBank(text, sourceFile = "") {
 
   const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
   
-  // ── 1. METADATA ─────────────────────────────────────────────────────────
-  // Account number 10188688439 found on page 1
   const accountNumber = text.match(/Account\s*number\s*(\d{11})/i)?.[1] || "10188688439";
   const clientName = "MALL AT CARNIVAL";
-  
-  // Extract year from header: "08 January 2026"
   const yearMatch = text.match(/\b202\d\b/);
   const statementYear = yearMatch ? yearMatch[0] : "2026";
 
@@ -18,11 +14,10 @@ export function parseStandardBank(text, sourceFile = "") {
   let runningBalance = null;
   const transactions = [];
 
-  // ── 2. TRANSACTION ENGINE ────────────────────────────────────────────────
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    // Identify Opening/Month-end Balance as the starting anchor
+    // Anchor Opening Balance
     if (/Balance\s*Brought\s*Forward|Month-end\s*Balance/i.test(line)) {
       const moneyMatches = line.match(/-?[\d\s,]+\.\d{2}-?/g);
       if (moneyMatches) {
@@ -32,50 +27,41 @@ export function parseStandardBank(text, sourceFile = "") {
       }
     }
 
-    // Look for the Numeric Date: MM DD (e.g. 12 08)
-    // Standard Bank business statements use numbers for months in the transaction list
+    // MM DD Numeric Date Pattern
     const dateMatch = line.match(/(0[1-9]|1[0-2])\s+([0-2][0-9]|3[01])/);
     
     if (dateMatch) {
-      const month = dateMatch[1];
-      const day = dateMatch[2];
-      const date = `${day}/${month}/${statementYear}`;
-      
+      const date = `${dateMatch[2]}/${dateMatch[1]}/${statementYear}`;
       const moneyMatches = line.match(/-?[\d\s,]+\.\d{2}-?/g) || [];
       
       if (moneyMatches.length > 0) {
-        // The balance is always the last currency-formatted string on the line
+        // We take the LAST money match as the balance anchor
         const lineBalance = parseStandardMoney(moneyMatches[moneyMatches.length - 1]);
         
-        // Use the line BEFORE the numbers as the transaction description
         let description = (lines[i-1] && !lines[i-1].includes('.')) ? lines[i-1] : "TRANSACTION";
         description = description.replace(/Customer Care|VAT Reg|PO BOX|MALL AT/gi, "").trim();
 
-        // Calculate amount by delta to handle "jammed" columns correctly
-        let amount = 0;
         if (runningBalance !== null) {
-          amount = parseFloat((lineBalance - runningBalance).toFixed(2));
-        }
+          const amount = parseFloat((lineBalance - runningBalance).toFixed(2));
 
-        // Filter out non-transactional summary totals
-        if (!/Total|outstanding|Balance\s*at/i.test(line) && Math.abs(amount) > 0) {
-          transactions.push({
-            date,
-            description: description.toUpperCase() || "BANK TRANSACTION",
-            amount,
-            balance: lineBalance,
-            account: accountNumber,
-            clientName,
-            bankName: "Standard Bank",
-            sourceFile
-          });
-          runningBalance = lineBalance;
+          if (!/Total|outstanding|Balance\s*at/i.test(line) && Math.abs(amount) > 0) {
+            transactions.push({
+              date,
+              description: description.toUpperCase(),
+              amount,
+              balance: lineBalance,
+              account: accountNumber,
+              clientName,
+              bankName: "Standard Bank",
+              sourceFile
+            });
+            runningBalance = lineBalance;
+          }
         }
       }
     }
   }
 
-  // Prepend the Opening Balance for UI reconciliation visibility
   if (openingBalance !== null) {
     transactions.unshift({
       date: `01/01/${statementYear}`,
@@ -89,17 +75,29 @@ export function parseStandardBank(text, sourceFile = "") {
     });
   }
 
-  return {
-    metadata: { accountNumber, clientName, openingBalance, bankName: "Standard Bank" },
-    transactions
-  };
+  return { metadata: { accountNumber, clientName, openingBalance, bankName: "Standard Bank" }, transactions };
 }
 
+/**
+ * Enhanced Money Parser for Jammed Business Statements
+ * Specifically handles the "Leading Sequence Number" artifact
+ */
 function parseStandardMoney(val) {
   if (!val) return 0;
-  // Strips internal spaces (e.g., "12 121" -> "12121")
+  
+  // 1. Remove currency/spaces/commas
   let clean = val.replace(/[R\s,]/g, "");
-  // Corrects trailing minus signs used by Standard Bank
-  if (clean.endsWith("-")) clean = "-" + clean.replace("-", "");
-  return parseFloat(clean);
+  const isNegative = clean.endsWith("-") || clean.startsWith("-");
+  clean = clean.replace("-", "");
+
+  // 2. REPEATABILITY FIX: 
+  // If the number is unnaturally long (e.g. 12121315.68), it has a sequence prefix.
+  // We identify the decimal point and keep only the digits belonging to the balance.
+  if (clean.includes(".") && clean.length > 9) {
+     const parts = clean.split(".");
+     // Keep the 2 decimals and the 6-7 digits preceding the dot
+     clean = parts[0].slice(-7) + "." + parts[1];
+  }
+
+  return parseFloat(clean) * (isNegative ? -1 : 1);
 }
