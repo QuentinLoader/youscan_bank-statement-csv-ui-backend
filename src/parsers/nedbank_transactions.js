@@ -1,47 +1,61 @@
-/**
- * Nedbank Parser
- * Strategy: Balance-driven verification (ABSA style)
- * Columns:
- * Date | Description | Fees | Debits | Credits | Balance
- */
+import { extractNedbankMetadata } from "./nedbank_metadata";
 
 export const parseNedbank = (text) => {
+  const metadata = extractNedbankMetadata(text);
   const transactions = [];
 
-  const parseNum = (val) => {
-    if (!val) return 0;
-    let clean = val.replace(/[\s,]/g, '');
-    return parseFloat(clean) || 0;
-  };
+  const lines = text.split("\n");
 
-  const accountMatch = text.match(/Current account\s+(\d+)/i);
-  const account = accountMatch ? accountMatch[1] : "Unknown";
+  let inTable = false;
+  let runningBalance = metadata.openingBalance;
+  let totalCredits = 0;
+  let totalDebits = 0;
 
-  const openMatch = text.match(/Opening balance\s+R?([\d.,]+)/i);
-  const closeMatch = text.match(/Closing balance\s+R?([\d.,]+)/i);
+  for (let rawLine of lines) {
+    const line = rawLine.trim();
 
-  const openingBalance = openMatch ? parseNum(openMatch[1]) : 0;
-  const closingBalance = closeMatch ? parseNum(closeMatch[1]) : 0;
+    // Detect start of transaction table
+    if (line.includes("Tran list no") && line.includes("Balance")) {
+      inTable = true;
+      continue;
+    }
 
-  const lines = text.split('\n');
-  let runningBalance = openingBalance;
+    if (!inTable) continue;
+    if (line.toLowerCase().includes("closing balance")) break;
+    if (line.length < 5) continue;
 
-  const txRegex = /(\d{2}\/\d{2}\/\d{4})\s+(.+?)\s+([\d,.\*]*)\s*([\d,.\*]*)\s*([\d,.\*]*)\s+([\d,.-]+)/;
+    // Match: Date Description Fees Debits Credits Balance
+    const match = line.match(
+      /(\d{2}\/\d{2}\/\d{4})\s+(.+?)\s+([\d,]*\.?\d{0,2})?\s*([\d,]*\.?\d{0,2})?\s*([\d,]*\.?\d{0,2})?\s+([\d,]+\.\d{2})/
+    );
 
-  lines.forEach(line => {
-    const match = line.match(txRegex);
-    if (!match) return;
+    if (!match) continue;
 
     const date = match[1];
-    let description = match[2].trim();
-    const debit = parseNum(match[4]);
-    const credit = parseNum(match[5]);
-    const balance = parseNum(match[6].replace('-', ''));
+    const description = match[2].trim();
+
+    const fees = match[3] ? parseFloat(match[3].replace(/,/g, "")) : 0;
+    const debit = match[4] ? parseFloat(match[4].replace(/,/g, "")) : 0;
+    const credit = match[5] ? parseFloat(match[5].replace(/,/g, "")) : 0;
+    const balance = parseFloat(match[6].replace(/,/g, ""));
 
     let amount = 0;
-    if (credit > 0) amount = credit;
-    else if (debit > 0) amount = -debit;
-    else amount = balance - runningBalance;
+
+    if (credit > 0) {
+      amount = credit;
+      totalCredits += credit;
+    } else if (debit > 0) {
+      amount = -debit;
+      totalDebits += debit;
+    } else if (fees > 0) {
+      amount = -fees;
+      totalDebits += fees;
+    } else {
+      // fallback reconciliation
+      amount = balance - runningBalance;
+      if (amount > 0) totalCredits += amount;
+      else totalDebits += Math.abs(amount);
+    }
 
     runningBalance = balance;
 
@@ -50,17 +64,27 @@ export const parseNedbank = (text) => {
       description,
       amount,
       balance,
-      account,
-      bankName: "Nedbank"
+      account: metadata.account,
+      clientName: metadata.clientName,
+      statementId: metadata.statementDate,
+      bankName: metadata.bankName
     });
-  });
+  }
+
+  // Reconciliation
+  const calculatedClosing =
+    metadata.openingBalance + totalCredits - totalDebits;
+
+  const reconciliationOk =
+    Math.abs(calculatedClosing - metadata.closingBalance) < 0.02;
 
   return {
     metadata: {
-      accountNumber: account,
-      openingBalance,
-      closingBalance,
-      bankName: "Nedbank"
+      ...metadata,
+      totalCredits,
+      totalDebits,
+      reconciliationOk,
+      transactionCount: transactions.length
     },
     transactions
   };
