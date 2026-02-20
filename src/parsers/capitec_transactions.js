@@ -1,11 +1,9 @@
 /**
- * Capitec Parser - Production Safe (Simplified Model)
- * Handles:
- * - Multi-page statements
- * - Multi-line descriptions
- * - Fee + MoneyOut combined via balance math
- * - Dynamic opening balance derivation
- * - Reliable account extraction
+ * Capitec Parser - Production Safe (Simplified Model + Metadata)
+ * Adds:
+ * - clientName
+ * - statementId (Unique Document No)
+ * - dynamic opening balance
  */
 
 export const parseCapitec = (text) => {
@@ -21,29 +19,46 @@ export const parseCapitec = (text) => {
   };
 
   // ------------------------------------------------------------------
-  // 1️⃣ Extract Account Number (Robust)
+  // 1️⃣ Metadata Extraction
   // ------------------------------------------------------------------
 
+  // Account
   let account = "Unknown";
-
-  // Pattern: Account \n 1234567890
   const accountBlockMatch = text.match(/Account\s*\n\s*(\d{10,})/i);
   if (accountBlockMatch) {
     account = accountBlockMatch[1];
   } else {
-    // Fallback: standalone 10–11 digit number near Main Account Statement
     const fallbackMatch = text.match(/\b\d{10,11}\b/);
     if (fallbackMatch) account = fallbackMatch[0];
   }
 
+  // Client Name (usually MR/MRS/MS etc in caps)
+  let clientName = "Unknown";
+  const nameMatch = text.match(/\b(MR|MRS|MS|DR)\s+[A-Z\s]+/);
+  if (nameMatch) {
+    clientName = nameMatch[0].trim();
+  }
+
+  // Statement ID (Unique Document No)
+  let statementId = "Unknown";
+  const statementMatch = text.match(/Unique Document No\.:\s*([a-f0-9\-]+)/i);
+  if (statementMatch) {
+    statementId = statementMatch[1];
+  }
+
   // ------------------------------------------------------------------
-  // 2️⃣ Isolate Transaction History Section
+  // 2️⃣ Isolate Transaction History
   // ------------------------------------------------------------------
 
   const startIndex = text.indexOf("Transaction History");
   if (startIndex === -1) {
     return {
-      metadata: { accountNumber: account, bankName: "Capitec" },
+      metadata: {
+        accountNumber: account,
+        clientName,
+        statementId,
+        bankName: "Capitec"
+      },
       transactions: []
     };
   }
@@ -84,7 +99,7 @@ export const parseCapitec = (text) => {
   );
 
   // ------------------------------------------------------------------
-  // 4️⃣ Parse Rows (Balance-Driven Logic)
+  // 4️⃣ Parse Rows
   // ------------------------------------------------------------------
 
   let runningBalance = null;
@@ -105,7 +120,6 @@ export const parseCapitec = (text) => {
     let amount = 0;
 
     if (runningBalance === null) {
-      // First transaction → derive opening balance later
       const possibleAmount =
         numbers.length >= 2
           ? parseNum(numbers[numbers.length - 2])
@@ -119,7 +133,6 @@ export const parseCapitec = (text) => {
       runningBalance = balance;
     }
 
-    // Remove numeric fields from description
     numbers.forEach(n => {
       body = body.replace(n, '');
     });
@@ -132,13 +145,11 @@ export const parseCapitec = (text) => {
       amount,
       balance,
       account,
+      clientName,
+      statementId,
       bankName: "Capitec"
     });
   });
-
-  // ------------------------------------------------------------------
-  // 5️⃣ Closing Balance
-  // ------------------------------------------------------------------
 
   const closingBalance =
     transactions.length > 0
@@ -148,6 +159,8 @@ export const parseCapitec = (text) => {
   return {
     metadata: {
       accountNumber: account,
+      clientName,
+      statementId,
       openingBalance,
       closingBalance,
       transactionCount: transactions.length,
