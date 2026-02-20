@@ -15,46 +15,53 @@ export const parseNedbank = (text) => {
     const line = rawLine.trim();
 
     // Detect start of transaction table
-    if (line.includes("Tran list no") && line.includes("Balance")) {
+    if (/Tran\s+list\s+no/i.test(line)) {
       inTable = true;
       continue;
     }
 
     if (!inTable) continue;
-    if (line.toLowerCase().includes("closing balance")) break;
+
+    // Stop at closing balance
+    if (/^Closing balance/i.test(line)) break;
+
     if (line.length < 5) continue;
 
-    // Match: Date Description Fees Debits Credits Balance
+    // Skip Opening balance row
+    if (/Opening balance/i.test(line)) {
+      continue;
+    }
+
+    /**
+     * Match structure examples from your file:
+     *
+     * 26/06/2025 MAINTENANCE FEE 250.00 * 93.08
+     * 27/06/2025 JHH FNB ACC. 400.00 493.08
+     * 08/07/2025 A SARS 0331191155 221003 11,369.18 11,641.29
+     * 000643 26/06/2025 VAT 28/05-25/06 = R41.73 0.00 343.27
+     */
+
     const match = line.match(
-      /(\d{2}\/\d{2}\/\d{4})\s+(.+?)\s+([\d,]*\.?\d{0,2})?\s*([\d,]*\.?\d{0,2})?\s*([\d,]*\.?\d{0,2})?\s+([\d,]+\.\d{2})/
+      /(?:(\d{6})\s+)?(\d{2}\/\d{2}\/\d{4})\s+(.+?)\s+([\d,]+\.\d{2})\s*\*?\s+([\d,]+\.\d{2})$/
     );
 
     if (!match) continue;
 
-    const date = match[1];
-    const description = match[2].trim();
+    const date = match[2];
+    const description = match[3].trim();
 
-    const fees = match[3] ? parseFloat(match[3].replace(/,/g, "")) : 0;
-    const debit = match[4] ? parseFloat(match[4].replace(/,/g, "")) : 0;
-    const credit = match[5] ? parseFloat(match[5].replace(/,/g, "")) : 0;
-    const balance = parseFloat(match[6].replace(/,/g, ""));
+    const amountRaw = match[4];
+    const balanceRaw = match[5];
 
-    let amount = 0;
+    const balance = parseFloat(balanceRaw.replace(/,/g, ""));
 
-    if (credit > 0) {
-      amount = credit;
-      totalCredits += credit;
-    } else if (debit > 0) {
-      amount = -debit;
-      totalDebits += debit;
-    } else if (fees > 0) {
-      amount = -fees;
-      totalDebits += fees;
+    // Balance-driven calculation
+    let amount = balance - runningBalance;
+
+    if (amount > 0) {
+      totalCredits += amount;
     } else {
-      // fallback reconciliation
-      amount = balance - runningBalance;
-      if (amount > 0) totalCredits += amount;
-      else totalDebits += Math.abs(amount);
+      totalDebits += Math.abs(amount);
     }
 
     runningBalance = balance;
@@ -71,7 +78,7 @@ export const parseNedbank = (text) => {
     });
   }
 
-  // Reconciliation
+  // Final reconciliation
   const calculatedClosing =
     metadata.openingBalance + totalCredits - totalDebits;
 
