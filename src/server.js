@@ -2,9 +2,6 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-console.log("🔥 SERVER FILE VERSION: Billing Authoritative + Usage Endpoint Active");
-console.log("DATABASE_URL exists:", !!process.env.DATABASE_URL);
-
 import helmet from "helmet";
 import express from "express";
 import cors from "cors";
@@ -36,7 +33,7 @@ app.use(globalLimiter);
 app.use(express.json());
 
 /* ============================
-   CORS CONFIG (FIXED)
+   CORS CONFIG
 ============================ */
 
 const allowedOrigins = [
@@ -66,7 +63,6 @@ app.use(
   })
 );
 
-// Proper preflight handling
 app.options("*", cors({
   origin: allowedOrigins,
   credentials: true
@@ -81,7 +77,7 @@ app.get("/", (req, res) =>
 );
 
 /* ============================
-   PRICING ENDPOINT
+   PRICING
 ============================ */
 
 app.get("/pricing", (req, res) => {
@@ -157,7 +153,7 @@ app.post(
 );
 
 /* ============================
-   GLOBAL ERROR HANDLING
+   404 HANDLER
 ============================ */
 
 app.use((req, res) => {
@@ -166,6 +162,10 @@ app.use((req, res) => {
     message: `The endpoint ${req.originalUrl} does not exist.`
   });
 });
+
+/* ============================
+   GLOBAL ERROR HANDLER
+============================ */
 
 app.use((err, req, res, next) => {
   console.error("Global Error:", err.stack);
