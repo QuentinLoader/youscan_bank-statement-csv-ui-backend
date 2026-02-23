@@ -249,7 +249,7 @@ router.post("/forgot-password", async (req, res) => {
     const resetUrl = `${process.env.APP_URL}/reset-password?token=${rawToken}`;
 
     await resend.emails.send({
-      from: "YouScan <addvision.co.za>",
+      from: "YouScan <no-reply@addvision.co.za>",
       to: email,
       subject: "Reset your YouScan password",
       html: `<p>Click below to reset your password:</p>

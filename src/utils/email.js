@@ -7,7 +7,7 @@ export const sendVerificationEmail = async (email, token) => {
   const verificationUrl = `${process.env.APP_URL}/verify-email?token=${token}`;
 
   await resend.emails.send({
-    from: "YouScan <addvision.co.za>",
+    from: "YouScan <no-reply@addvision.co.za>",
     to: email,
     subject: "Verify your YouScan account",
     html: `
