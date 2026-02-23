@@ -35,33 +35,47 @@ app.use(globalLimiter);
 
 app.use(express.json());
 
-const allowedOrigin = process.env.FRONTEND_URL;
+/* ============================
+   CORS CONFIG (FIXED)
+============================ */
 
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  "https://youscan.addvision.co.za"
+];
 
-    if (
-      origin === allowedOrigin ||
-      origin.endsWith(".lovable.app") ||
-      origin.endsWith(".lovableproject.com")
-    ) {
-      return callback(null, true);
-    }
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
 
-    console.warn("Blocked by CORS:", origin);
-    return callback(null, false);
-  },
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+      if (
+        allowedOrigins.includes(origin) ||
+        origin.endsWith(".lovable.app") ||
+        origin.endsWith(".lovableproject.com")
+      ) {
+        return callback(null, true);
+      }
+
+      console.warn("Blocked by CORS:", origin);
+      return callback(new Error("Not allowed by CORS"));
+    },
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true
+  })
+);
+
+// Proper preflight handling
+app.options("*", cors({
+  origin: allowedOrigins,
   credentials: true
 }));
-
-app.options("*", cors());
 
 /* ============================
    HEALTH CHECK
 ============================ */
+
 app.get("/", (req, res) =>
   res.send("YouScan Engine: Production Billing Active")
 );
@@ -69,6 +83,7 @@ app.get("/", (req, res) =>
 /* ============================
    PRICING ENDPOINT
 ============================ */
+
 app.get("/pricing", (req, res) => {
   res.json(PRICING);
 });
@@ -76,16 +91,17 @@ app.get("/pricing", (req, res) => {
 /* ============================
    AUTH ROUTES
 ============================ */
+
 app.use("/auth", authRoutes);
 
 /* ============================
-   USAGE ROUTES (NEW)
+   USAGE ROUTES
 ============================ */
+
 app.use("/usage", usageRoutes);
 
 /* ============================
    PARSE ROUTE
-   ⚠ NO BILLING HERE ANYMORE
 ============================ */
 
 const upload = multer({
@@ -105,7 +121,6 @@ app.post(
   checkPlanAccess,
   upload.any(),
   async (req, res) => {
-
     try {
       const files = req.files || [];
 
