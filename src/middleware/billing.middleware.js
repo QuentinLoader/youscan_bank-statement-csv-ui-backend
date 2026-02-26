@@ -18,6 +18,23 @@ export default async function billingMiddleware(req, res, next) {
 
   const now = new Date();
 
+  // 🟢 FREE PLAN
+  if (user.plan_code === "FREE") {
+    if (user.lifetime_parses_used >= 15) {
+      return res.status(402).json({
+        error: "FREE_LIMIT_REACHED",
+        upgrade_options: [
+          "PAYG_10",
+          "MONTHLY_25",
+          "PRO_YEAR_UNLIMITED"
+        ]
+      });
+    }
+
+    req.billingUser = user;
+    return next();
+  }
+
   // 🟣 PRO YEAR UNLIMITED
   if (user.plan_code === "PRO_YEAR_UNLIMITED") {
     if (
