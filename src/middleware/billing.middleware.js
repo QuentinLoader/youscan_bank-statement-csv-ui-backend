@@ -13,7 +13,7 @@ export default async function billingMiddleware(req, res, next) {
 
   const user = rows[0];
 
-  if (!user.email_verified)
+  if (!user.is_verified)
     return res.status(403).json({ error: "EMAIL_NOT_VERIFIED" });
 
   const now = new Date();
