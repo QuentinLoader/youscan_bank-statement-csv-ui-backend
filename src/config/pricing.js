@@ -2,6 +2,15 @@ export const PRICING = {
   currency: "ZAR",
 
   PLANS: {
+    FREE: {
+      plan_code: "FREE",
+      name: "Free",
+      type: "lifetime",
+      credits: 15,
+      price_cents: 0,
+      recurring: false
+    },
+
     PAYG_10: {
       plan_code: "PAYG_10",
       name: "Pay-as-YouScan",
