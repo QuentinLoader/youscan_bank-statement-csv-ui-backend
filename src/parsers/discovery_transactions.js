@@ -2,49 +2,46 @@
 
 export function parseDiscovery(text, sourceFile = "") {
   if (!text || typeof text !== "string") {
-    console.log("❌ No text received in Discovery parser");
     return { metadata: {}, transactions: [] };
   }
 
-  console.log("🟡 DISCOVERY PARSER STARTED");
+  // ───── NORMALIZE TEXT (CRITICAL FIX) ─────
+  let normalized = text.replace(/\r/g, "\n");
 
-  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  // Insert newline before every transaction date
+  normalized = normalized.replace(
+    /(\d{1,2}\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+20\d{2})/g,
+    "\n$1"
+  );
 
-  console.log(`📏 Total lines extracted: ${lines.length}`);
+  const lines = normalized
+    .split("\n")
+    .map(l => l.trim())
+    .filter(Boolean);
 
-  // ─────────────────────────────────────────────
-  // METADATA EXTRACTION
-  // ─────────────────────────────────────────────
+  // ───── METADATA ─────
 
-  const accountMatch = text.match(/Transaction Account\s+(\d{8,16})/i);
+  const accountMatch = normalized.match(/Transaction Account\s+(\d{8,16})/i);
   const accountNumber = accountMatch ? accountMatch[1] : null;
 
-  const clientNameMatch = text.match(/(?:Mr|Mrs|Ms|Dr|Prof)\s+[A-Z][A-Za-z\s]+/);
+  const clientNameMatch = normalized.match(/(?:Mr|Mrs|Ms|Dr|Prof)\s+[A-Z][A-Za-z\s]+/);
   const clientName = clientNameMatch ? clientNameMatch[0].trim() : null;
 
-  const openMatch = text.match(
+  const openMatch = normalized.match(
     /Opening balance on\s+\d{1,2}\s+\w+\s+\d{4}\s+R([\d\s,.]+\.\d{2})/i
   );
 
   const openingBalance = openMatch
-    ? parseDiscoveryMoney(openMatch[1])
+    ? parseMoney(openMatch[1])
     : 0;
 
-  const closeMatch = text.match(
+  const closeMatch = normalized.match(
     /Closing balance on\s+\d{1,2}\s+\w+\s+\d{4}\s+R([\d\s,.]+\.\d{2})/i
   );
 
   const closingBalance = closeMatch
-    ? parseDiscoveryMoney(closeMatch[1])
+    ? parseMoney(closeMatch[1])
     : 0;
-
-  console.log("📊 Metadata extracted:");
-  console.log({
-    accountNumber,
-    clientName,
-    openingBalance,
-    closingBalance
-  });
 
   let runningBalance = openingBalance;
   const transactions = [];
@@ -54,45 +51,30 @@ export function parseDiscovery(text, sourceFile = "") {
     Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12"
   };
 
-  // RELAXED REGEX (no end-of-line anchor)
   const txRegex =
     /^(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(20\d{2})\s+(.+?)\s+(-?\s?R[\d\s,.]+\.\d{2})/;
 
-  // ─────────────────────────────────────────────
-  // TRANSACTION LOOP
-  // ─────────────────────────────────────────────
-
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-
-    console.log(`🔎 Checking line ${i}:`, JSON.stringify(line));
-
     const match = line.match(txRegex);
 
-    if (!match) {
-      continue;
-    }
-
-    console.log("✅ MATCH FOUND:", JSON.stringify(line));
+    if (!match) continue;
 
     const day = match[1].padStart(2, "0");
     const month = months[match[2]];
     const year = match[3];
-
     const date = `${year}-${month}-${day}`;
 
     let description = match[4].trim();
-    const amount = parseDiscoveryMoney(match[5]);
+    const amount = parseMoney(match[5]);
 
+    // Handle wrapped description lines
     const nextLine = lines[i + 1];
-
-    // Handle wrapped descriptions
     if (
       nextLine &&
       !nextLine.match(/^\d{1,2}\s+\w+/) &&
       !nextLine.match(/R\s?\d/)
     ) {
-      console.log("↪️ Multi-line description detected:", nextLine);
       description += " " + nextLine.trim();
       i++;
     }
@@ -111,8 +93,6 @@ export function parseDiscovery(text, sourceFile = "") {
     });
   }
 
-  console.log(`📦 Transactions extracted: ${transactions.length}`);
-
   return {
     metadata: {
       accountNumber,
@@ -126,10 +106,7 @@ export function parseDiscovery(text, sourceFile = "") {
   };
 }
 
-/**
- * Money parser
- */
-function parseDiscoveryMoney(val) {
+function parseMoney(val) {
   if (!val) return 0;
 
   let clean = val.replace(/[R,\s]/g, "");
@@ -137,7 +114,6 @@ function parseDiscoveryMoney(val) {
   clean = clean.replace("-", "");
 
   const parsed = parseFloat(clean);
-
   if (isNaN(parsed)) return 0;
 
   return isNegative ? -parsed : parsed;
