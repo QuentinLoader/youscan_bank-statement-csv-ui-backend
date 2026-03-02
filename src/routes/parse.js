@@ -22,7 +22,7 @@ router.post(
         return res.status(400).json({ error: "NO_FILE_UPLOADED" });
       }
 
-      console.log("File received in route, passing to service...");
+      console.log("📥 File received in route, passing to service...");
 
       const result = await parseStatement(req.file.buffer);
 
@@ -31,6 +31,8 @@ router.post(
       // ==========================================================
 
       if (result?.errorCode) {
+        console.log("🚫 Parser returned errorCode:", result.errorCode);
+
         if (result.errorCode === "UNSUPPORTED_BANK") {
           return res.status(400).json({
             error: "UNSUPPORTED_BANK",
@@ -61,6 +63,7 @@ router.post(
         !Array.isArray(result.transactions) ||
         result.transactions.length === 0
       ) {
+        console.log("⚠️ No transactions detected.");
         return res.status(422).json({
           error: "PARSE_FAILED_OR_EMPTY"
         });
@@ -71,6 +74,7 @@ router.post(
       // ==========================================================
 
       await deductUserCredit(userId);
+      console.log("💳 Credit deducted for user:", userId);
 
       // Optional usage logging
       await client.query(
@@ -80,10 +84,14 @@ router.post(
         [userId, "parse_statement", 1]
       );
 
+      // ==========================================================
+      // 4️⃣ RETURN FULL STRUCTURED RESULT
+      // ==========================================================
+
       return res.status(200).json(result);
 
     } catch (error) {
-      console.error("Parse Route Error:", error);
+      console.error("❌ Parse Route Error:", error);
 
       if (error.message === "FREE_LIMIT_REACHED") {
         return res.status(402).json({ error: "FREE_LIMIT_REACHED" });
