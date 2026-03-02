@@ -27,41 +27,47 @@ router.post(
       const result = await parseStatement(req.file.buffer);
 
       // ==========================================================
-      // HANDLE PARSER ERROR CODES FIRST (NO CREDIT DEDUCTION)
+      // 1️⃣ HANDLE PARSER ERROR CODES FIRST
       // ==========================================================
 
-      if (result?.errorCode === "UNSUPPORTED_BANK") {
-        return res.status(400).json({
-          error: "UNSUPPORTED_BANK",
-          message: "This bank is not currently supported."
-        });
-      }
+      if (result?.errorCode) {
+        if (result.errorCode === "UNSUPPORTED_BANK") {
+          return res.status(400).json({
+            error: "UNSUPPORTED_BANK",
+            message: "This bank is not currently supported."
+          });
+        }
 
-      if (result?.errorCode === "UNKNOWN_BANK") {
-        return res.status(400).json({
-          error: "UNKNOWN_BANK",
-          message: "We could not detect the bank type."
-        });
-      }
+        if (result.errorCode === "UNKNOWN_BANK") {
+          return res.status(400).json({
+            error: "UNKNOWN_BANK",
+            message: "We could not detect the bank type."
+          });
+        }
 
-      if (result?.errorCode === "PARSER_ERROR") {
-        return res.status(500).json({
-          error: "PARSER_ERROR"
-        });
+        if (result.errorCode === "PARSER_ERROR") {
+          return res.status(500).json({
+            error: "PARSER_ERROR"
+          });
+        }
       }
 
       // ==========================================================
-      // VALIDATE TRANSACTIONS EXIST
+      // 2️⃣ VALIDATE TRANSACTION STRUCTURE
       // ==========================================================
 
-      if (!result || !result.transactions || !result.transactions.length) {
+      if (
+        !result ||
+        !Array.isArray(result.transactions) ||
+        result.transactions.length === 0
+      ) {
         return res.status(422).json({
           error: "PARSE_FAILED_OR_EMPTY"
         });
       }
 
       // ==========================================================
-      // DEDUCT CREDIT (Atomic inside billing.service)
+      // 3️⃣ DEDUCT CREDIT (Atomic inside billing.service)
       // ==========================================================
 
       await deductUserCredit(userId);
