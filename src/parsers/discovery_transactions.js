@@ -9,16 +9,17 @@ export function parseDiscovery(text, sourceFile = "") {
   const cleanText = text.replace(/\r/g, "");
 
   // --- Metadata Extraction ---
-  const accountNumberMatch = cleanText.match(/(?:Discovery Gold Transaction Account)[^\d]+(\d{10,15})/i);
+  // Updated to handle both quoted CSV and flattened text
+  const accountNumberMatch = cleanText.match(/Transaction Account[^\d]*(\d{10,15})/i);
   const accountNumber = accountNumberMatch ? accountNumberMatch[1] : null; 
   
   const clientNameMatch = cleanText.match(/(?:Mr|Mrs|Ms|Dr|Prof)\s+[A-Za-z\s]+/); 
   const clientName = clientNameMatch ? clientNameMatch[0].trim() : null; 
 
-  const openingBalanceMatch = cleanText.match(/"Opening balance"[^\d-]+(-?\s?R[\d\s,.-]+\.\d{2})/i); 
+  const openingBalanceMatch = cleanText.match(/Opening balance[^\d-]+(-?\s?R[\d\s,.-]+\.\d{2})/i); 
   const openingBalance = openingBalanceMatch ? parseMoney(openingBalanceMatch[1]) : 0; 
 
-  const closingBalanceMatch = cleanText.match(/"Closing balance"[^\d-]+(-?\s?R[\d\s,.-]+\.\d{2})/i); 
+  const closingBalanceMatch = cleanText.match(/Closing balance[^\d-]+(-?\s?R[\d\s,.-]+\.\d{2})/i); 
   const closingBalance = closingBalanceMatch ? parseMoney(closingBalanceMatch[1]) : 0; 
 
   const transactions = [];
@@ -63,8 +64,9 @@ export function parseDiscovery(text, sourceFile = "") {
     const row = rows[j];
     if (!row || row.length === 0) continue;
 
+    // Fix weirdly split inverted dates (e.g. "Jan 2026 \n 27")
     if (row[0]) {
-      const weirdDateMatch = row[0].match(/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(20\d{2})[\s\n]+(\d{1,2})/);
+      const weirdDateMatch = row[0].match(/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(20\d{2})[\s\n]+(\d{1,2})/i);
       if (weirdDateMatch) {
         row[0] = row[0].replace(weirdDateMatch[0], `${weirdDateMatch[3]} ${weirdDateMatch[1]} ${weirdDateMatch[2]}`);
       }
@@ -77,32 +79,41 @@ export function parseDiscovery(text, sourceFile = "") {
       const newRow = splitCells.map(c => (c[i] !== undefined ? c[i] : ""));
       
       if (newRow.some(cell => cell !== "")) {
-        const dateMatch = newRow[0]?.match(/^(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(20\d{2})/);
+        // HYBRID FIX: Join the row into a single string to bypass column alignment issues
+        const fullRowText = newRow.join(" ").trim();
+        
+        // Strict anchor to find the date
+        const dateMatch = fullRowText.match(/^\s*(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(20\d{2})/i);
         
         if (dateMatch) {
           const day = dateMatch[1].padStart(2, "0");
-          const month = months[dateMatch[2]];
+          const monthKey = dateMatch[2].substring(0, 3);
+          const month = months[monthKey.charAt(0).toUpperCase() + monthKey.substring(1).toLowerCase()];
           const year = dateMatch[3];
           const date = `${year}-${month}-${day}`;
 
-          let amountStr = newRow[newRow.length - 1];
-          if (!amountStr || !amountStr.match(/R[\d\s,.]+/)) {
-            amountStr = newRow[newRow.length - 2]; 
-          }
-
-          if (amountStr && amountStr.match(/R[\d\s,.]+/)) {
-            const amount = parseMoney(amountStr);
+          // Strict extraction to pull ONLY the currency string
+          const amountMatch = fullRowText.match(/(-?\s?R[\d\s,.]+\.\d{2})/);
+          
+          if (amountMatch) {
+            const amount = parseMoney(amountMatch[1]);
             
-            let description = newRow.slice(1, -1)
-                .filter(col => col && !col.startsWith("***") && !col.match(/R[\d\s,.]+/))
-                .join(" ")
+            // Generate description by erasing the date, amount, masked cards, and boilerplate
+            let description = fullRowText
+                .replace(dateMatch[0], "")
+                .replace(amountMatch[0], "")
+                .replace(/\*\*\*\d{4}/g, "") 
+                .replace(/POS Purchase|RPP|Online|EFT|Fee|Interest|Reward|Declined Int Card Purch|Transfer|Details|Amount|Type/gi, "")
+                .replace(/,/g, " ")
                 .trim();
+
+            description = description.replace(/\s+/g, " ").toUpperCase() || "UNKNOWN";
 
             runningBalance = Number((runningBalance + amount).toFixed(2));
 
             transactions.push({
               date,
-              description: description.toUpperCase() || "UNKNOWN",
+              description,
               amount,
               balance: runningBalance,
               account: accountNumber,
