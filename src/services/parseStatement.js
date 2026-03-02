@@ -12,14 +12,30 @@ export const parseStatement = async (fileBuffer) => {
     const text = data.text;
     const lowerText = text.toLowerCase().replace(/\s+/g, ' ');
 
-    console.log("📄 PDF Header Snippet:", text.substring(0, 300).replace(/\n/g, ' '));
+    console.log(
+      "📄 PDF Header Snippet:",
+      text.substring(0, 300).replace(/\n/g, ' ')
+    );
 
     let parserResult = null;
     let bankName = null;
     let bankLogo = null;
 
     // ==========================================================
-    // SUPPORTED BANKS (Allow-list strategy)
+    // 1️⃣ EXPLICITLY UNSUPPORTED — CHECK FIRST
+    // ==========================================================
+
+    if (
+      lowerText.includes("standard bank of south africa") ||
+      lowerText.includes("transact@standardbank.co.za") ||
+      lowerText.includes("0860 123 000")
+    ) {
+      console.log("🚫 Standard Bank detected — unsupported.");
+      return { errorCode: "UNSUPPORTED_BANK" };
+    }
+
+    // ==========================================================
+    // 2️⃣ SUPPORTED BANKS (Allow-list strategy)
     // ==========================================================
 
     if (
@@ -64,10 +80,8 @@ export const parseStatement = async (fileBuffer) => {
     }
 
     else if (
-      lowerText.includes("fnb") ||
       lowerText.includes("first national bank") ||
-      lowerText.includes("bbst") ||
-      lowerText.includes("rekeningnommer")
+      lowerText.includes("fnb.co.za")
     ) {
       console.log("🏦 Detected Bank: FNB");
       parserResult = parseFnb(text);
@@ -76,32 +90,16 @@ export const parseStatement = async (fileBuffer) => {
     }
 
     // ==========================================================
-    // EXPLICITLY UNSUPPORTED
-    // ==========================================================
-
-    else if (
-      lowerText.includes("standard bank of south africa") ||
-      lowerText.includes("achieva current account")
-    ) {
-      console.log("🚫 Standard Bank detected — unsupported.");
-      return {
-        errorCode: "UNSUPPORTED_BANK"
-      };
-    }
-
-    // ==========================================================
-    // UNKNOWN BANK
+    // 3️⃣ UNKNOWN BANK
     // ==========================================================
 
     else {
       console.warn("⚠️ Unknown bank signature.");
-      return {
-        errorCode: "UNKNOWN_BANK"
-      };
+      return { errorCode: "UNKNOWN_BANK" };
     }
 
     // ==========================================================
-    // NORMALIZE OUTPUT
+    // 4️⃣ NORMALIZE OUTPUT
     // ==========================================================
 
     let transactions = [];
@@ -129,8 +127,6 @@ export const parseStatement = async (fileBuffer) => {
 
   } catch (error) {
     console.error("❌ Critical Parsing Error:", error.message);
-    return {
-      errorCode: "PARSER_ERROR"
-    };
+    return { errorCode: "PARSER_ERROR" };
   }
 };
