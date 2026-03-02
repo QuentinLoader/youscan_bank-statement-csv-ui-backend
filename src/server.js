@@ -15,6 +15,7 @@ import pool from "./config/db.js";
 import authRoutes from "./routes/auth.routes.js";
 import usageRoutes from "./routes/usage.routes.js";
 import billingRoutes from "./routes/billing.routes.js";
+import { router as parseRoute } from "./routes/parse.js";
 
 import { authenticateUser } from "./middleware/auth.middleware.js";
 import { checkPlanAccess } from "./middleware/credits.middleware.js";
@@ -103,6 +104,8 @@ app.use("/usage", usageRoutes);
 ============================ */
 
 app.use("/billing", billingRoutes);
+
+app.use("/parse", parseRoute);
 
 /* ============================
    PARSE ROUTE (Billing Integrated)
