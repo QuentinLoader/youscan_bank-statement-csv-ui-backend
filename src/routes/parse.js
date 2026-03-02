@@ -1,3 +1,4 @@
+console.log("🔥 ROUTE FILE ACTIVE:", import.meta.url);
 import express from "express";
 import multer from "multer";
 import rateLimit from "express-rate-limit";

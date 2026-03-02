@@ -1,4 +1,5 @@
 // 🔥 LOAD ENV FIRST
+console.log("🔥 SERVER BUILD ID: 2026-03-02-CLEAN-PARSE");
 import dotenv from "dotenv";
 dotenv.config();
 
