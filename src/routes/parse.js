@@ -5,6 +5,9 @@ import { parseStatement } from "../services/parseStatement.js";
 import { authenticateUser } from "../middleware/auth.middleware.js";
 import { deductUserCredit } from "../services/billing.service.js";
 
+// 🔥 PROVE WHICH FILE IS RUNNING
+console.log("🔥 ACTIVE PARSE ROUTE FILE:", import.meta.url);
+
 export const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -13,18 +16,32 @@ router.post(
   authenticateUser,
   upload.single("file"),
   async (req, res) => {
+
+    console.log("🔥 /parse ROUTE HIT");
+    console.log("🔥 FILE:", import.meta.url);
+
     const client = await pool.connect();
 
     try {
       const userId = req.user.userId;
+      console.log("👤 User ID:", userId);
 
       if (!req.file) {
+        console.log("🚫 NO_FILE_UPLOADED");
         return res.status(400).json({ error: "NO_FILE_UPLOADED" });
       }
 
       console.log("📥 File received in route, passing to service...");
 
       const result = await parseStatement(req.file.buffer);
+
+      console.log("🧠 Raw parseStatement result:");
+      console.dir(result, { depth: null });
+
+      // ==========================================================
+      // 🚨 OPTIONAL HARD TEST (UNCOMMENT TO FORCE VERIFY ROUTE)
+      // ==========================================================
+      // return res.status(418).json({ test: "ACTIVE_PARSE_ROUTE_CONFIRMED" });
 
       // ==========================================================
       // 1️⃣ HANDLE PARSER ERROR CODES FIRST
@@ -64,6 +81,8 @@ router.post(
         result.transactions.length === 0
       ) {
         console.log("⚠️ No transactions detected.");
+        console.log("⚠️ Result shape:", result);
+
         return res.status(422).json({
           error: "PARSE_FAILED_OR_EMPTY"
         });
@@ -76,13 +95,14 @@ router.post(
       await deductUserCredit(userId);
       console.log("💳 Credit deducted for user:", userId);
 
-      // Optional usage logging
       await client.query(
         `INSERT INTO usage_logs
          (user_id, action, credits_deducted)
          VALUES ($1, $2, $3)`,
         [userId, "parse_statement", 1]
       );
+
+      console.log("✅ Returning structured result to frontend");
 
       // ==========================================================
       // 4️⃣ RETURN FULL STRUCTURED RESULT
@@ -91,6 +111,7 @@ router.post(
       return res.status(200).json(result);
 
     } catch (error) {
+
       console.error("❌ Parse Route Error:", error);
 
       if (error.message === "FREE_LIMIT_REACHED") {
@@ -111,6 +132,7 @@ router.post(
 
     } finally {
       client.release();
+      console.log("🔚 DB client released");
     }
   }
 );
