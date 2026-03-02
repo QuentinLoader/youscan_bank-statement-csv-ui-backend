@@ -1,4 +1,4 @@
-import pool from "../config/db.js";
+/* import pool from "../config/db.js";
 
 export default async function billingMiddleware(req, res, next) {
   const userId = req.user.userId;
@@ -91,4 +91,4 @@ export default async function billingMiddleware(req, res, next) {
   }
 
   return res.status(400).json({ error: "INVALID_PLAN" });
-}
+} */

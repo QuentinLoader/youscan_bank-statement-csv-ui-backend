@@ -1,4 +1,4 @@
-import express from "express";
+/* import express from "express";
 import pool from "../config/db.js";
 import { authenticateUser } from "../middleware/auth.middleware.js";
 import billingMiddleware from "../middleware/billing.middleware.js";
@@ -9,6 +9,7 @@ const router = express.Router();
  * POST /api/billing/consume-credit
  * Used to deduct credit AFTER successful parse/export
  */
+/*
 router.post(
   "/consume-credit",
   authenticateUser,
@@ -66,4 +67,5 @@ router.post(
   }
 );
 
-export default router;
+export default router; 
+*/
