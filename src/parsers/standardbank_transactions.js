@@ -3,125 +3,98 @@
 export function parseStandardBank(text, sourceFile = "") {
   if (!text || typeof text !== "string") return { metadata: {}, transactions: [] };
 
-  // Normalize Text
   const cleanText = text.replace(/\r/g, "\n");
   const lines = cleanText.split("\n").map(l => l.trim()).filter(Boolean);
 
-  // ── 1. METADATA ─────────────────────────────────────────────────────────
-  const accountNumberMatch = cleanText.match(/(?:Account\s*number|Account\s*No)[^\d]*(\d{9,13})/i);
-  const accountNumber = accountNumberMatch ? accountNumberMatch[1] : "10188688439";
+  // ── 1. METADATA & STATEMENT PERIOD ────────────────────────────────────────
+  // Strip spaces from account number (e.g. 1009 547 382 1)
+  const accountNumberMatch = cleanText.match(/(?:Account\s*Number)[^\d]*([\d\s]+)/i);
+  const accountNumber = accountNumberMatch ? accountNumberMatch[1].replace(/\s/g, "") : "UNKNOWN";
 
-  const clientNameMatch = cleanText.match(/(?:Mr|Mrs|Ms|Dr|Prof)\s+[A-Za-z\s]+|MALL AT CARNIVAL/i);
+  const clientNameMatch = cleanText.match(/(?:MR\.|MRS\.|MS\.|DR\.|PROF\.)\s+[A-Za-z\s]+/i);
   const clientName = clientNameMatch ? clientNameMatch[0].trim() : "UNKNOWN";
 
-  const yearMatch = cleanText.match(/\b20\d{2}\b/);
-  const statementYear = yearMatch ? yearMatch[0] : new Date().getFullYear().toString();
+  // Handle Year Rollovers (e.g., Statement from 08 December 2025 to 08 January 2026)
+  let startYear = new Date().getFullYear();
+  let endYear = startYear;
+  const periodMatch = cleanText.match(/from\s+\d{2}\s+[a-zA-Z]+\s+(\d{4})\s+to\s+\d{2}\s+[a-zA-Z]+\s+(\d{4})/i);
+  if (periodMatch) {
+    startYear = parseInt(periodMatch[1], 10);
+    endYear = parseInt(periodMatch[2], 10);
+  }
 
-  // Extract Exact Opening and Closing Balances
+  // Exact Opening and Closing Balances
   let openingBalance = 0;
   let closingBalance = 0;
 
-  const obMatch = cleanText.match(/(?:Balance\s*Brought\s*Forward|OPENING BALANCE)[^\d-]+(-?[\d\s,]+[.,]\d{2}-?)/i);
+  const obMatch = cleanText.match(/BALANCE BROUGHT FORWARD.*?(?:0[1-9]|1[0-2])\s+(?:[0-2][0-9]|3[01])\s+(-?[\d\s,]+[.,]\d{2}-?)/i);
   if (obMatch) openingBalance = parseStandardMoney(obMatch[1]);
 
-  const cbMatch = cleanText.match(/(?:Month-end\s*Balance|CLOSING BALANCE|Carried\s*Forward)[^\d-]+(-?[\d\s,]+[.,]\d{2}-?)/i);
+  const cbMatch = cleanText.match(/Balance outstanding.*?(-?[\d\s,]+[.,]\d{2}-?)/i);
   if (cbMatch) closingBalance = parseStandardMoney(cbMatch[1]);
 
   const transactions = [];
-  let runningBalance = openingBalance;
-
-  // Regex to identify Standard Bank's currency
-  const moneyRegex = /-?[\d\s,]+[.,]\d{2}-?/g;
-  
-  // Anchor strictly to the start of the line for the date
-  const dateRegex = /^(\d{2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/i;
 
   // ── 2. TRANSACTION ENGINE ────────────────────────────────────────────────
+  // Captures: 1(Description) 2(Amount) 3(Month) 4(Day) 5(Balance)
+  const txRegex = /^(.*?)\s+(-?[\d\s,]+[.,]\d{2}-?)\s+(0[1-9]|1[0-2])\s+([0-2][0-9]|3[01])\s+(-?[\d\s,]+[.,]\d{2}-?)$/i;
+  
+  // Boilerplate to ignore when scanning for wrapped descriptions
+  const ignorePatterns = /Customer Care|VAT Reg|PO BOX|MALL AT|Statement|Page \d|0860 123|@standardbank|ACHIEVA/i;
+
   for (let i = 0; i < lines.length; i++) {
-    let line = lines[i];
+    const line = lines[i];
 
-    const dateMatch = line.match(dateRegex);
+    const match = line.match(txRegex);
 
-    if (dateMatch) {
-      const day = dateMatch[1];
-      const months = { jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06", jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12" };
-      const month = months[dateMatch[2].toLowerCase()];
-      const date = `${statementYear}-${month}-${day}`;
+    if (match) {
+      // It's a valid transaction line
+      let description = match[1].trim();
+      const amountStr = match[2];
+      const month = match[3];
+      const day = match[4];
+      const balanceStr = match[5];
 
-      const moneyMatches = line.match(moneyRegex);
+      // Determine the correct year based on month crossover (e.g., Dec vs Jan)
+      let txYear = endYear;
+      if (startYear !== endYear && month === "12") {
+        txYear = startYear;
+      }
 
-      if (moneyMatches && moneyMatches.length >= 1) {
-        // Balance is strictly the last money format
-        const lineBalanceStr = moneyMatches[moneyMatches.length - 1];
-        const lineBalance = parseStandardMoney(lineBalanceStr);
+      const date = `${txYear}-${month}-${day}`;
+      const amount = parseStandardMoney(amountStr);
+      const balance = parseStandardMoney(balanceStr);
 
-        let amountStr = null;
-        let amount = 0;
+      transactions.push({
+        date,
+        description: description.toUpperCase(),
+        amount,
+        balance,
+        account: accountNumber,
+        clientName,
+        bankName: "Standard Bank",
+        sourceFile
+      });
 
-        if (moneyMatches.length >= 2) {
-          amountStr = moneyMatches[moneyMatches.length - 2];
-          amount = parseStandardMoney(amountStr);
-        } else if (runningBalance !== null) {
-          amount = parseFloat((lineBalance - runningBalance).toFixed(2));
-        }
-
-        // --- Description Extraction ---
-        let description = line;
-        
-        // Remove Date AND potential adjacent Value Date
-        const datePatternStr = dateMatch[0].replace(/\s+/g, "\\s+");
-        const doubleDateRegex = new RegExp(`^${datePatternStr}\\s*(?:${datePatternStr})?`, 'i');
-        description = description.replace(doubleDateRegex, "");
-        
-        // Remove amounts
-        description = description.replace(lineBalanceStr, "").trim();
-        if (amountStr) {
-            description = description.replace(amountStr, "").trim();
-        }
-
-        // Lookahead to append multi-line descriptions Standard Bank drops below the transaction
-        let lookaheadIdx = i + 1;
-        while (lookaheadIdx < lines.length) {
-          const nextLine = lines[lookaheadIdx];
-          // Break if we hit a new date, a balance footer, or a standalone currency amount
-          if (
-            nextLine.match(dateRegex) || 
-            nextLine.match(/Balance Brought Forward|Month-end Balance/i) ||
-            nextLine.match(moneyRegex)
-          ) {
-            break;
-          }
-          description += " " + nextLine.trim();
-          lookaheadIdx++;
-        }
-
-        // Clean up text artifacts
-        description = description.replace(/Customer Care|VAT Reg|PO BOX|MALL AT/gi, "").trim();
-        description = description.replace(/\s+/g, " ").toUpperCase() || "BANK TRANSACTION";
-
-        // Push valid transactions
-        if (!/TOTAL|BALANCE BROUGHT FORWARD/i.test(line) && Math.abs(amount) > 0) {
-          transactions.push({
-            date,
-            description,
-            amount,
-            balance: lineBalance,
-            account: accountNumber,
-            clientName,
-            bankName: "Standard Bank",
-            sourceFile
-          });
-          
-          runningBalance = lineBalance;
-        }
+    } else if (transactions.length > 0) {
+      // If it doesn't match the transaction pattern, it might be a wrapped description for the PREVIOUS transaction
+      if (
+        !line.match(/BALANCE BROUGHT FORWARD|Month-end Balance|Balance outstanding/i) &&
+        !line.match(ignorePatterns) &&
+        !line.match(/^Total/i) &&
+        line.length > 3
+      ) {
+        // Append this floating text to the description of the last recorded transaction
+        transactions[transactions.length - 1].description += " " + line.toUpperCase().trim();
       }
     }
   }
 
-  // Prepend the Opening Balance
+  // Prepend Opening Balance for clean UI
   if (openingBalance !== 0 || transactions.length > 0) {
+    const obDate = transactions.length > 0 ? transactions[0].date : `${startYear}-01-01`;
     transactions.unshift({
-      date: `${statementYear}-01-01`, 
+      date: obDate, 
       description: "OPENING BALANCE",
       amount: 0,
       balance: openingBalance,
@@ -133,7 +106,14 @@ export function parseStandardBank(text, sourceFile = "") {
   }
 
   return {
-    metadata: { accountNumber, clientName, openingBalance, closingBalance, bankName: "Standard Bank", sourceFile },
+    metadata: { 
+      accountNumber, 
+      clientName, 
+      openingBalance, 
+      closingBalance, 
+      bankName: "Standard Bank", 
+      sourceFile 
+    },
     transactions
   };
 }
@@ -144,12 +124,14 @@ function parseStandardMoney(val) {
   
   let clean = val.replace(/[R\s]/g, "");
   
+  // South African decimal handling
   if (clean.includes(",") && clean.includes(".")) {
      clean = clean.replace(/,/g, ""); 
   } else if (clean.includes(",")) {
      clean = clean.replace(/,/g, ".");
   }
   
+  // Convert trailing minus to leading minus (e.g. 1252.94- -> -1252.94)
   if (clean.endsWith("-")) {
     clean = "-" + clean.slice(0, -1);
   }
