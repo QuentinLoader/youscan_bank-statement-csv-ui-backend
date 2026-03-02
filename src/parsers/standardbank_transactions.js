@@ -3,162 +3,122 @@
 export function parseStandardBank(text, sourceFile = "") {
   if (!text || typeof text !== "string") return { metadata: {}, transactions: [] };
 
-  const cleanText = text.replace(/\r/g, "");
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
 
   // ── 1. METADATA & YEAR ROLLOVER ─────────────────────────────────────────
-  const accountNumberMatch = cleanText.match(/(?:Account\s*Number)[^\d]*([\d\s]+)/i);
+  const accountNumberMatch = text.match(/(?:Account\s*Number)[^\d]*([\d\s]+)/i);
   const accountNumber = accountNumberMatch ? accountNumberMatch[1].replace(/\s/g, "") : "UNKNOWN";
 
-  const clientNameMatch = cleanText.match(/(?:MR\.|MRS\.|MS\.|DR\.|PROF\.)\s+[A-Za-z\s]+/i);
+  const clientNameMatch = text.match(/(?:MR\.|MRS\.|MS\.|DR\.|PROF\.)\s+[A-Za-z\s]+/i);
   const clientName = clientNameMatch ? clientNameMatch[0].trim() : "UNKNOWN";
 
-  // Standard Bank statements spanning Dec-Jan need year rollover logic
   let startYear = new Date().getFullYear();
   let endYear = startYear;
-  const periodMatch = cleanText.match(/from\s+\d{2}\s+[a-zA-Z]+\s+(\d{4})\s+to\s+\d{2}\s+[a-zA-Z]+\s+(\d{4})/i);
+  const periodMatch = text.match(/from\s+\d{2}\s+[a-zA-Z]+\s+(\d{4})\s+to\s+\d{2}\s+[a-zA-Z]+\s+(\d{4})/i);
   if (periodMatch) {
     startYear = parseInt(periodMatch[1], 10);
     endYear = parseInt(periodMatch[2], 10);
   } else {
-    const yearMatch = cleanText.match(/\b20\d{2}\b/);
+    const yearMatch = text.match(/\b20\d{2}\b/);
     if (yearMatch) {
         startYear = parseInt(yearMatch[0], 10);
         endYear = startYear;
     }
   }
 
-  // ── 2. CUSTOM CSV LEXER ──────────────────────────────────────────────────
-  // Reconstructs the squashed table layout standard bank uses
-  const rows = [];
-  let currentRow = [];
-  let currentCell = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < cleanText.length; i++) {
-    const char = cleanText[i];
-    if (inQuotes) {
-      if (char === '"' && cleanText[i + 1] === '"') {
-        currentCell += '"'; i++;
-      } else if (char === '"') {
-        inQuotes = false;
-      } else {
-        currentCell += char;
-      }
-    } else {
-      if (char === '"') inQuotes = true;
-      else if (char === ',') { currentRow.push(currentCell); currentCell = ""; }
-      else if (char === '\n') { 
-        currentRow.push(currentCell); 
-        rows.push(currentRow); 
-        currentRow = []; currentCell = ""; 
-      }
-      else currentCell += char;
-    }
-  }
-  if (currentCell || currentRow.length > 0) { currentRow.push(currentCell); rows.push(currentRow); }
-
-  // ── 3. TRANSACTION ENGINE ────────────────────────────────────────────────
+  // ── 2. TRANSACTION ENGINE ────────────────────────────────────────────────
   const transactions = [];
   let openingBalance = null;
   let runningBalance = 0;
 
-  // Regex to match "MM DD" (allowing for OCR typos like "12.22")
-  const dateRegex = /\b(0[1-9]|1[0-2])[\s.]([0-2][0-9]|3[01])\b/g;
-  const balanceRegex = /-?[\d\s.,]+\d{2}-?/g;
+  // Strict regex matches: 1(Desc), 2(Amount?), 3(Month), 4(Day), 5(Balance)
+  // Anchored to the END of the string to prevent date/balance bleeding
+  const txRegex = /^(.*?)\s+(?:(-?[\d\s,]+[.,]\d{2}-?)\s+)?(0[1-9]|1[0-2])[\s.]([0-2][0-9]|3[01])\s+(-?[\d\s,]+[.,]\d{2}-?)$/i;
 
-  for (const row of rows) {
-    // Standard Bank Personal tables guarantee 5 columns:
-    // 0: Details, 1: Debits, 2: Credits, 3: Date, 4: Balance
-    if (row.length >= 5) {
-       const datesCol = row[3] || "";
-       const balancesCol = row[4] || "";
+  for (const line of lines) {
+     // Skip footer boilerplate that mimics numbers
+     if (/Total charge amount|Account Summary|Balance outstanding/i.test(line)) continue;
 
-       const dateMatches = datesCol.match(dateRegex) || [];
-       const balanceMatches = balancesCol.match(balanceRegex) || [];
-       
-       // Clean balances to prevent picking up stray text dashes
-       const validBalances = balanceMatches.filter(b => /\d/.test(b)).map(parseStandardMoney);
+     const match = line.match(txRegex);
 
-       // If the number of dates matches the number of balances, it's a valid transaction chunk!
-       if (dateMatches.length === validBalances.length && dateMatches.length > 0) {
-           
-           // Extract the full description block
-           let chunkDesc = (row[0] || "").replace(/\n/g, " ").replace(/\s+/g, " ").trim();
-           chunkDesc = chunkDesc.replace(/Customer Care|VAT Reg|PO BOX|MALL AT|Statement|Page \d|0860 123/gi, "").trim();
+     if (match) {
+         let desc = match[1].trim();
+         const amountStr = match[2];
+         const month = match[3];
+         const day = match[4];
+         const balanceStr = match[5];
 
-           // Process each transaction mathematically via the running balance
-           for (let i = 0; i < dateMatches.length; i++) {
-               const dateStr = dateMatches[i].replace(".", " "); // Fix OCR errors
-               const dateParts = dateStr.split(/\s+/);
-               const month = dateParts[0];
-               const day = dateParts[1];
-               
-               // Apply Year Rollover Logic
-               let txYear = endYear;
-               if (startYear !== endYear && month === "12") txYear = startYear;
-               const date = `${txYear}-${month}-${day}`;
-               
-               const balance = validBalances[i];
+         const balance = parseStandardMoney(balanceStr);
 
-               // Capture the native Opening Balance from the first row of the statement
-               if (chunkDesc.includes("BALANCE BROUGHT FORWARD") && openingBalance === null && i === 0) {
-                   openingBalance = balance;
-                   runningBalance = balance;
-                   continue; // Skip pushing this directly to prevent duplicates
-               }
+         // Safely intercept Opening Balance
+         if (desc.includes("BALANCE BROUGHT FORWARD") && openingBalance === null) {
+             openingBalance = balance;
+             runningBalance = balance;
+             continue; // We inject this explicitly at the end for the UI
+         }
 
-               if (openingBalance === null) openingBalance = 0; // Failsafe
+         let txYear = endYear;
+         if (startYear !== endYear && month === "12") txYear = startYear;
+         const date = `${txYear}-${month}-${day}`;
 
-               // Calculate true amount via Delta Math (bulletproof)
-               const amount = parseFloat((balance - runningBalance).toFixed(2));
-               runningBalance = balance;
+         let amount = 0;
+         if (amountStr) {
+             amount = parseStandardMoney(amountStr);
+         } else {
+             amount = parseFloat((balance - runningBalance).toFixed(2));
+         }
 
-               if (Math.abs(amount) > 0 || chunkDesc.includes("FEE")) {
-                   let finalDesc = chunkDesc.toUpperCase() || "BANK TRANSACTION";
-                   if (dateMatches.length === 1) {
-                      finalDesc = finalDesc.replace(/BALANCE BROUGHT FORWARD/gi, "").trim();
-                   }
+         // Clean up Standard Bank artifacts
+         desc = desc.replace(/##/g, "").replace(/\s+/g, " ").trim();
 
-                   transactions.push({
-                      date,
-                      description: finalDesc,
-                      amount,
-                      balance,
-                      account: accountNumber,
-                      clientName,
-                      bankName: "Standard Bank",
-                      sourceFile
-                   });
-               }
-           }
-       }
-    }
+         if (Math.abs(amount) > 0 || desc.includes("FEE")) {
+             transactions.push({
+                 date,
+                 description: desc.toUpperCase() || "BANK TRANSACTION",
+                 amount,
+                 balance,
+                 account: accountNumber,
+                 clientName,
+                 bankName: "Standard Bank",
+                 sourceFile
+             });
+         }
+         runningBalance = balance;
+         
+     } else if (transactions.length > 0) {
+         // If a line doesn't match the regex, it's likely a wrapped description from the previous transaction
+         const isBoilerplate = /Customer Care|VAT Reg|PO BOX|MALL AT|Statement|Page \d|0860 123|@standardbank|ACHIEVA/i.test(line);
+         const isDateLine = /^\d{2} (January|February|March|April|May|June|July|August|September|October|November|December) \d{4}/i.test(line);
+         
+         if (!isBoilerplate && !isDateLine && line.length > 3) {
+             transactions[transactions.length - 1].description += " " + line.replace(/##/g, "").trim().toUpperCase();
+         }
+     }
   }
 
-  // ── 4. CLOSING & FRONT-END RECONCILIATION ─────────────────────────────────
+  // ── 3. FRONT-END RECONCILIATION ──────────────────────────────────────────
   let closingBalance = runningBalance;
-  const cbMatch = cleanText.match(/Balance outstanding.*?(-?[\d\s.,]+\d{2}-?)/i);
+  const cbMatch = text.match(/Balance outstanding.*?(-?[\d\s.,]+\d{2}-?)/i);
   if (cbMatch) {
      closingBalance = parseStandardMoney(cbMatch[1]);
   }
 
-  // Append clean Opening Balance explicitly for UI
-  if (openingBalance !== null && openingBalance !== 0 || transactions.length > 0) {
+  if (openingBalance !== null) {
      transactions.unshift({
-       date: `${startYear}-01-01`, 
-       description: "OPENING BALANCE",
-       amount: 0,
-       balance: openingBalance || 0,
-       account: accountNumber,
-       clientName,
-       bankName: "Standard Bank",
-       sourceFile
+         date: `${startYear}-01-01`,
+         description: "OPENING BALANCE",
+         amount: 0,
+         balance: openingBalance,
+         account: accountNumber,
+         clientName,
+         bankName: "Standard Bank",
+         sourceFile
      });
   }
 
   return {
-    metadata: { accountNumber, clientName, openingBalance, closingBalance, bankName: "Standard Bank", sourceFile },
-    transactions
+      metadata: { accountNumber, clientName, openingBalance, closingBalance, bankName: "Standard Bank", sourceFile },
+      transactions
   };
 }
 
@@ -166,11 +126,8 @@ export function parseStandardBank(text, sourceFile = "") {
 function parseStandardMoney(val) {
   if (!val) return 0;
   let clean = val.replace(/[R\s]/g, "");
-  
-  // Standard Bank often trails negative signs (e.g., 1252.94-)
   if (clean.endsWith("-")) clean = "-" + clean.slice(0, -1);
   
-  // Robust decimal and thousand separator parsing (handles OCR typos like double dots)
   const lastDot = clean.lastIndexOf(".");
   const lastComma = clean.lastIndexOf(",");
   const separatorIdx = Math.max(lastDot, lastComma);
