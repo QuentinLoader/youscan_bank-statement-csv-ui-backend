@@ -5,7 +5,6 @@ import { parseAbsa } from '../parsers/absa_transactions.js';
 import { parseFnb } from '../parsers/fnb_transactions.js';
 import { parseDiscovery } from '../parsers/discovery_transactions.js';
 import { parseNedbank } from '../parsers/nedbank_transactions.js';
-import { parseStandardBank } from '../parsers/standardbank_transactions.js';
 
 export const parseStatement = async (fileBuffer) => {
   try {
@@ -16,16 +15,13 @@ export const parseStatement = async (fileBuffer) => {
     console.log("📄 PDF Header Snippet:", text.substring(0, 300).replace(/\n/g, ' '));
 
     let parserResult = null;
-    let bankName = "Unknown";
-    let bankLogo = "unknown";
+    let bankName = null;
+    let bankLogo = null;
 
-    // =========================================================================
-    // 1. BANK DETECTION STRATEGY (ORDER MATTERS)
-    // =========================================================================
+    // ==========================================================
+    // SUPPORTED BANKS (Allow-list strategy)
+    // ==========================================================
 
-    // ---------------------------
-    // DISCOVERY BANK
-    // ---------------------------
     if (
       lowerText.includes("discovery gold transaction account") ||
       lowerText.includes("discovery bank limited")
@@ -36,9 +32,6 @@ export const parseStatement = async (fileBuffer) => {
       bankLogo = "discovery";
     }
 
-    // ---------------------------
-    // NEDBANK
-    // ---------------------------
     else if (
       lowerText.includes("nedbank ltd") ||
       lowerText.includes("see money differently")
@@ -49,22 +42,6 @@ export const parseStatement = async (fileBuffer) => {
       bankLogo = "nedbank";
     }
 
-    // ---------------------------
-    // STANDARD BANK
-    // ---------------------------
-    else if (
-      lowerText.includes("standard bank of south africa") ||
-      lowerText.includes("achieva current account")
-    ) {
-      console.log("🏦 Detected Bank: Standard Bank");
-      parserResult = parseStandardBank(text);
-      bankName = "Standard Bank";
-      bankLogo = "standardbank";
-    }
-
-    // ---------------------------
-    // CAPITEC
-    // ---------------------------
     else if (
       lowerText.includes("unique document no") ||
       lowerText.includes("capitec bank limited") ||
@@ -76,9 +53,6 @@ export const parseStatement = async (fileBuffer) => {
       bankLogo = "capitec";
     }
 
-    // ---------------------------
-    // ABSA
-    // ---------------------------
     else if (
       lowerText.includes("absa") &&
       (lowerText.includes("cheque account") || lowerText.includes("absa bank"))
@@ -89,9 +63,6 @@ export const parseStatement = async (fileBuffer) => {
       bankLogo = "absa";
     }
 
-    // ---------------------------
-    // FNB
-    // ---------------------------
     else if (
       lowerText.includes("fnb") ||
       lowerText.includes("first national bank") ||
@@ -104,25 +75,39 @@ export const parseStatement = async (fileBuffer) => {
       bankLogo = "fnb";
     }
 
-    // ---------------------------
-    // FALLBACK
-    // ---------------------------
-    else {
-      console.warn("⚠️ Bank signature not found. Defaulting to Capitec.");
-      parserResult = parseCapitec(text);
-      bankName = "Capitec";
-      bankLogo = "capitec";
+    // ==========================================================
+    // EXPLICITLY UNSUPPORTED
+    // ==========================================================
+
+    else if (
+      lowerText.includes("standard bank of south africa") ||
+      lowerText.includes("achieva current account")
+    ) {
+      console.log("🚫 Standard Bank detected — unsupported.");
+      return {
+        errorCode: "UNSUPPORTED_BANK"
+      };
     }
 
-    // =========================================================================
-    // 2. NORMALIZE OUTPUT
-    // =========================================================================
+    // ==========================================================
+    // UNKNOWN BANK
+    // ==========================================================
+
+    else {
+      console.warn("⚠️ Unknown bank signature.");
+      return {
+        errorCode: "UNKNOWN_BANK"
+      };
+    }
+
+    // ==========================================================
+    // NORMALIZE OUTPUT
+    // ==========================================================
 
     let transactions = [];
     let metadata = {};
 
     if (parserResult) {
-      // Preferred format: { metadata, transactions }
       if (
         parserResult.transactions &&
         Array.isArray(parserResult.transactions)
@@ -130,7 +115,6 @@ export const parseStatement = async (fileBuffer) => {
         transactions = parserResult.transactions;
         metadata = parserResult.metadata || {};
       }
-      // Legacy format: [Array]
       else if (Array.isArray(parserResult)) {
         transactions = parserResult;
       }
@@ -146,10 +130,7 @@ export const parseStatement = async (fileBuffer) => {
   } catch (error) {
     console.error("❌ Critical Parsing Error:", error.message);
     return {
-      transactions: [],
-      metadata: {},
-      bankName: "Error",
-      bankLogo: "error"
+      errorCode: "PARSER_ERROR"
     };
   }
 };

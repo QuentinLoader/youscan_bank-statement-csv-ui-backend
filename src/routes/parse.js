@@ -26,25 +26,44 @@ router.post(
 
       const result = await parseStatement(req.file.buffer);
 
+      // ==========================================================
+      // HANDLE PARSER ERROR CODES FIRST (NO CREDIT DEDUCTION)
+      // ==========================================================
+
+      if (result?.errorCode === "UNSUPPORTED_BANK") {
+        return res.status(400).json({
+          error: "UNSUPPORTED_BANK",
+          message: "This bank is not currently supported."
+        });
+      }
+
+      if (result?.errorCode === "UNKNOWN_BANK") {
+        return res.status(400).json({
+          error: "UNKNOWN_BANK",
+          message: "We could not detect the bank type."
+        });
+      }
+
+      if (result?.errorCode === "PARSER_ERROR") {
+        return res.status(500).json({
+          error: "PARSER_ERROR"
+        });
+      }
+
+      // ==========================================================
+      // VALIDATE TRANSACTIONS EXIST
+      // ==========================================================
+
       if (!result || !result.transactions || !result.transactions.length) {
         return res.status(422).json({
           error: "PARSE_FAILED_OR_EMPTY"
         });
       }
 
-      const detectedBank =
-        (result.bankName || "").toLowerCase();
+      // ==========================================================
+      // DEDUCT CREDIT (Atomic inside billing.service)
+      // ==========================================================
 
-      // 🔒 BLOCK STANDARD BANK BEFORE CREDIT DEDUCTION
-      if (detectedBank.includes("standard bank")) {
-        return res.status(400).json({
-          error: "UNSUPPORTED_BANK",
-          message:
-            "Standard Bank statements are currently not supported."
-        });
-      }
-
-      // ✅ Deduct credit safely (atomic inside billing.service)
       await deductUserCredit(userId);
 
       // Optional usage logging
