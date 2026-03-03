@@ -5,12 +5,6 @@ import { PRICING } from "../config/pricing.js";
 
 const router = express.Router();
 
-/*
-=========================================
-CREATE OZOW PAYMENT
-POST /billing/create-ozow-payment
-=========================================
-*/
 router.post(
   "/create-ozow-payment",
   authenticateUser,
@@ -30,10 +24,9 @@ router.post(
 
       const user = req.userRecord;
 
-      // SERVER-CONTROLLED AMOUNT
-     const amount = Number(plan.price).toFixed(2);
+      const amount = Number(plan.price).toFixed(2);
 
-      const transactionReference = `${user.id}_${plan.code}_${Date.now()}`;
+      const transactionReference = `${user.id}_${planCode}_${Date.now()}`;
       const bankReference = `YOUSCAN-${Date.now()}`;
 
       const successUrl = "https://youscan.addvision.co.za/payment-return";
@@ -44,12 +37,6 @@ router.post(
 
       const siteCode = process.env.OZOW_SITE_CODE;
       const privateKey = process.env.OZOW_PRIVATE_KEY;
-
-      /*
-      =========================================
-      HASH GENERATION (CRITICAL)
-      =========================================
-      */
 
       const stringToHash =
         siteCode +
@@ -68,12 +55,6 @@ router.post(
         .createHash("sha512")
         .update(stringToHash)
         .digest("hex");
-
-      /*
-      =========================================
-      RETURN AUTO-SUBMIT FORM
-      =========================================
-      */
 
       const paymentForm = `
         <html>
