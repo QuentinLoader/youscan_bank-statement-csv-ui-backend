@@ -89,7 +89,7 @@ router.post(
 
       let creditsDeducted = 0;
 
-      // FREE plan — atomic lifetime limit protection
+      // FREE PLAN
       if (user.plan_code === "FREE") {
         const freeResult = await pool.query(
           `
@@ -105,14 +105,16 @@ router.post(
         if (freeResult.rowCount === 0) {
           return res.status(403).json({
             code: "FREE_LIMIT_REACHED",
-            message: "Free lifetime limit reached."
+            message: "Free lifetime limit reached.",
+            upgrade_required: true,
+            suggested_plan: "PAYG_10"
           });
         }
 
         creditsDeducted = 1;
       }
 
-      // CREDIT BASED PLANS — atomic deduction
+      // CREDIT-BASED PLANS
       else if (user.plan_code !== "PRO_YEAR_UNLIMITED") {
         const deductionResult = await pool.query(
           `
@@ -128,7 +130,9 @@ router.post(
         if (deductionResult.rowCount === 0) {
           return res.status(403).json({
             code: "CREDITS_EXHAUSTED",
-            message: "No credits remaining."
+            message: "No credits remaining.",
+            upgrade_required: true,
+            suggested_plan: "MONTHLY_25"
           });
         }
 
