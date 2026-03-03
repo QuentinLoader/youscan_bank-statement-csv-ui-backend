@@ -83,7 +83,7 @@ router.post("/forgot-password", async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      // Silent success (security best practice)
+      // Security: do not reveal whether email exists
       return res.json({ message: "If the email exists, a reset link has been sent." });
     }
 
@@ -91,7 +91,6 @@ router.post("/forgot-password", async (req, res) => {
 
     const rawToken = crypto.randomBytes(32).toString("hex");
     const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
-
     const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
     await pool.query(
@@ -215,13 +214,15 @@ router.post("/login", async (req, res) => {
 
     const user = result.rows[0];
 
-    if (!user)
+    if (!user) {
       return res.status(400).json({ message: "Invalid credentials" });
+    }
 
     const validPassword = await bcrypt.compare(password, user.password_hash);
 
-    if (!validPassword)
+    if (!validPassword) {
       return res.status(400).json({ message: "Invalid credentials" });
+    }
 
     const token = jwt.sign(
       { userId: user.id },
@@ -262,7 +263,18 @@ router.get("/me", authenticateUser, async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    res.json(user);
+    const lowCreditWarning =
+      user.plan_code !== "PRO_YEAR_UNLIMITED" &&
+      (
+        (user.plan_code === "FREE" && user.lifetime_parses_used >= 13) ||
+        (user.credits_remaining !== null &&
+         user.credits_remaining <= 3)
+      );
+
+    res.json({
+      ...user,
+      low_credit_warning: lowCreditWarning
+    });
 
   } catch (err) {
     console.error("ME ERROR", err);
