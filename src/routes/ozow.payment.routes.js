@@ -1,18 +1,3 @@
-console.log("=== OZOW HASH DEBUG ===");
-console.log("SiteCode:", siteCode);
-console.log("CountryCode: ZA");
-console.log("CurrencyCode:", PRICING.currency);
-console.log("Amount:", amount);
-console.log("TransactionReference:", transactionReference);
-console.log("BankReference:", bankReference);
-console.log("CancelURL:", cancelUrl);
-console.log("ErrorURL:", errorUrl);
-console.log("SuccessURL:", successUrl);
-console.log("NotifyURL:", notifyUrl);
-console.log("IsTest:", isTest);
-console.log("PrivateKey:", privateKey);
-console.log("STRING TO HASH:", stringToHash);
-
 import express from "express";
 import crypto from "crypto";
 import { authenticateUser } from "../middleware/auth.middleware.js";
@@ -37,7 +22,6 @@ router.post(
         return res.status(400).json({ error: "Invalid plan" });
       }
 
-      // 🔐 FIXED USER ACCESS
       const user = req.user;
 
       if (!user || !user.userId) {
@@ -57,27 +41,26 @@ router.post(
 
       const siteCode = process.env.OZOW_SITE_CODE;
       const privateKey = process.env.OZOW_PRIVATE_KEY;
+      const isTest = "false";
 
       if (!siteCode || !privateKey) {
-        console.error("Missing Ozow environment variables");
         return res.status(500).json({ error: "Payment configuration error" });
       }
 
-      const isTest = "false";
-
+      // 🔥 CRITICAL: EXACT ORDER REQUIRED BY OZOW
       const stringToHash =
-      siteCode +
-      "ZA" +
-      PRICING.currency +
-      amount +
-      transactionReference +
-      bankReference +
-      cancelUrl +
-      errorUrl +
-      successUrl +
-      notifyUrl +
-      isTest +
-      privateKey;
+        siteCode +
+        "ZA" +
+        PRICING.currency +
+        amount +
+        transactionReference +
+        bankReference +
+        cancelUrl +
+        errorUrl +
+        successUrl +
+        notifyUrl +
+        isTest +
+        privateKey;
 
       const hashCheck = crypto
         .createHash("sha512")
@@ -98,7 +81,7 @@ router.post(
               <input type="hidden" name="ErrorURL" value="${errorUrl}" />
               <input type="hidden" name="SuccessURL" value="${successUrl}" />
               <input type="hidden" name="NotifyURL" value="${notifyUrl}" />
-              <input type="hidden" name="IsTest" value="false" />
+              <input type="hidden" name="IsTest" value="${isTest}" />
               <input type="hidden" name="HashCheck" value="${hashCheck}" />
             </form>
           </body>
