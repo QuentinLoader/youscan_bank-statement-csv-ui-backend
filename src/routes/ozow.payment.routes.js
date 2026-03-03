@@ -61,6 +61,9 @@ router.post(
         notifyUrl +
         isTest +
         privateKey;
+        
+console.log("STRING TO HASH:");
+console.log(stringToHash);
 
       const hashCheck = crypto
         .createHash("sha512")
