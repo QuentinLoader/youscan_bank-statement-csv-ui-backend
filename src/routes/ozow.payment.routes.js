@@ -22,11 +22,16 @@ router.post(
         return res.status(400).json({ error: "Invalid plan" });
       }
 
-      const user = req.userRecord;
+      // 🔐 FIXED USER ACCESS
+      const user = req.user;
+
+      if (!user || !user.userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
 
       const amount = (plan.price_cents / 100).toFixed(2);
 
-      const transactionReference = `${user.id}_${planCode}_${Date.now()}`;
+      const transactionReference = `${user.userId}_${planCode}_${Date.now()}`;
       const bankReference = `YOUSCAN-${Date.now()}`;
 
       const successUrl = "https://youscan.addvision.co.za/payment-return";
@@ -37,6 +42,11 @@ router.post(
 
       const siteCode = process.env.OZOW_SITE_CODE;
       const privateKey = process.env.OZOW_PRIVATE_KEY;
+
+      if (!siteCode || !privateKey) {
+        console.error("Missing Ozow environment variables");
+        return res.status(500).json({ error: "Payment configuration error" });
+      }
 
       const stringToHash =
         siteCode +
