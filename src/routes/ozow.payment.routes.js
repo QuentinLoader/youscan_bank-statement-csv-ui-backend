@@ -22,7 +22,7 @@ router.post(
         return res.status(400).json({ error: "Plan code required" });
       }
 
-      const plan = PRICING.find(p => p.code === planCode);
+      const plan = PRICING[planCode];
 
       if (!plan) {
         return res.status(400).json({ error: "Invalid plan" });
@@ -31,7 +31,7 @@ router.post(
       const user = req.userRecord;
 
       // SERVER-CONTROLLED AMOUNT
-      const amount = plan.price.toFixed(2);
+     const amount = Number(plan.price).toFixed(2);
 
       const transactionReference = `${user.id}_${plan.code}_${Date.now()}`;
       const bankReference = `YOUSCAN-${Date.now()}`;
