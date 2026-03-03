@@ -59,7 +59,6 @@ router.post(
         errorUrl +
         successUrl +
         notifyUrl +
-        isTest +
         privateKey;
         
 console.log("STRING TO HASH:");
