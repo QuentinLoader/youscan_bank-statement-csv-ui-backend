@@ -1,3 +1,18 @@
+console.log("=== OZOW HASH DEBUG ===");
+console.log("SiteCode:", siteCode);
+console.log("CountryCode: ZA");
+console.log("CurrencyCode:", PRICING.currency);
+console.log("Amount:", amount);
+console.log("TransactionReference:", transactionReference);
+console.log("BankReference:", bankReference);
+console.log("CancelURL:", cancelUrl);
+console.log("ErrorURL:", errorUrl);
+console.log("SuccessURL:", successUrl);
+console.log("NotifyURL:", notifyUrl);
+console.log("IsTest:", isTest);
+console.log("PrivateKey:", privateKey);
+console.log("STRING TO HASH:", stringToHash);
+
 import express from "express";
 import crypto from "crypto";
 import { authenticateUser } from "../middleware/auth.middleware.js";
