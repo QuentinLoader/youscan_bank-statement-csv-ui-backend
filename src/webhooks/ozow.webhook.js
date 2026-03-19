@@ -5,35 +5,39 @@ import crypto from "crypto";
 
 const router = express.Router();
 
-// ✅ Helper: Safe string (handles undefined/null EXACTLY like Ozow expects)
-function safe(val) {
-  return val === undefined || val === null ? "" : String(val).trim();
-}
-
-// ✅ Generate Ozow Webhook Hash (CORRECT ORDER)
+// ✅ Generate Ozow Webhook Hash (STRICT + EXPLICIT ORDER)
 function generateOzowWebhookHash(data, privateKey) {
-  const hashString =
-    safe(data.SiteCode) +
-    safe(data.TransactionId) +
-    safe(data.TransactionReference) +
-    safe(data.Amount) +
-    safe(data.Status) +
-    safe(data.Optional1) +
-    safe(data.Optional2) +
-    safe(data.Optional3) +
-    safe(data.Optional4) +
-    safe(data.Optional5) +
-    safe(data.CurrencyCode) +
-    safe(data.IsTest) +
-    safe(privateKey);
+  const hashParts = [
+    data.SiteCode,
+    data.TransactionId,
+    data.TransactionReference,
+    data.Amount,
+    data.Status,
 
+    // ✅ MUST be included EVEN if empty
+    data.Optional1 || "",
+    data.Optional2 || "",
+    data.Optional3 || "",
+    data.Optional4 || "",
+    data.Optional5 || "",
+
+    data.CurrencyCode,
+    data.IsTest,
+
+    privateKey
+  ];
+
+  // ✅ Force exact formatting
+  const hashString = hashParts.map(v => String(v).trim()).join("");
+
+  console.log("HASH PARTS:", hashParts);
   console.log("WEBHOOK HASH STRING:", hashString);
 
   return crypto
     .createHash("sha512")
     .update(hashString, "utf-8")
     .digest("hex")
-    .toLowerCase(); // ✅ normalize
+    .toLowerCase();
 }
 
 // ✅ Use URL-encoded parser (Ozow format)
@@ -77,10 +81,12 @@ router.post(
         process.env.OZOW_PRIVATE_KEY
       );
 
-      console.log("GENERATED HASH:", generatedHash);
-      console.log("OZOW HASH:", String(Hash).toLowerCase());
+      const ozowHash = String(Hash).trim().toLowerCase();
 
-      if (generatedHash !== String(Hash).toLowerCase()) {
+      console.log("GENERATED HASH:", generatedHash);
+      console.log("OZOW HASH:", ozowHash);
+
+      if (generatedHash !== ozowHash) {
         console.error("❌ Hash mismatch");
         return res.status(400).send("Invalid signature");
       }
@@ -98,9 +104,9 @@ router.post(
       console.log("💰 Payment successful:", TransactionReference);
 
       // =========================
-      // ✅ 4. TODO: BILLING LOGIC
+      // ✅ 4. BILLING PLACEHOLDER
       // =========================
-      // Example placeholder:
+      // 🔜 Next step:
       // await applyBilling(TransactionReference, Amount);
 
       return res.status(200).send("OK");
