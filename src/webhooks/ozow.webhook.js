@@ -5,21 +5,35 @@ import crypto from "crypto";
 
 const router = express.Router();
 
-// 🔥 CRITICAL FIX: Normalize amount (Ozow removes trailing zeros)
+// ✅ Normalize amount (safe to keep)
 function normalizeAmount(amount) {
   return parseFloat(amount).toString();
 }
 
-// ✅ Ozow webhook hash (correct for your setup)
+// ✅ FINAL CORRECT HASH (FULL FORMAT)
 function generateOzowWebhookHash(data, privateKey) {
-  const hashString =
-    String(data.SiteCode).trim() +
-    String(data.TransactionId).trim() +
-    String(data.TransactionReference).trim() +
-    normalizeAmount(data.Amount) + // 🔥 FIX HERE
-    String(data.Status).trim() +
-    String(privateKey).trim();
+  const parts = [
+    data.SiteCode,
+    data.TransactionId,
+    data.TransactionReference,
+    normalizeAmount(data.Amount),
+    data.Status,
 
+    data.Optional1 ?? "",
+    data.Optional2 ?? "",
+    data.Optional3 ?? "",
+    data.Optional4 ?? "",
+    data.Optional5 ?? "",
+
+    data.CurrencyCode,
+    data.IsTest,
+
+    privateKey
+  ];
+
+  const hashString = parts.map(v => String(v).trim()).join("");
+
+  console.log("HASH PARTS:", parts);
   console.log("WEBHOOK HASH STRING:", JSON.stringify(hashString));
 
   return crypto
@@ -48,9 +62,7 @@ router.post(
         Hash
       } = payload;
 
-      // =========================
-      // ✅ 1. VALIDATE SITE
-      // =========================
+      // ✅ Validate site
       if (SiteCode !== process.env.OZOW_SITE_CODE) {
         console.error("❌ Invalid SiteCode");
         return res.status(400).send("Invalid site");
@@ -61,9 +73,7 @@ router.post(
         return res.status(400).send("Missing hash");
       }
 
-      // =========================
-      // ✅ 2. VERIFY HASH
-      // =========================
+      // ✅ Generate hash
       const generatedHash = generateOzowWebhookHash(
         payload,
         process.env.OZOW_PRIVATE_KEY
@@ -81,20 +91,15 @@ router.post(
 
       console.log("✅ Hash verified");
 
-      // =========================
-      // ✅ 3. ONLY PROCESS SUCCESS
-      // =========================
+      // ✅ Only process success
       if (Status !== "Complete") {
-        console.log("⏳ Ignoring status:", Status);
+        console.log("⏳ Ignoring:", Status);
         return res.status(200).send("Ignored");
       }
 
-      console.log("💰 Payment successful:", TransactionReference);
+      console.log("💰 Payment success:", TransactionReference);
 
-      // =========================
-      // 🚀 4. BILLING PLACEHOLDER
-      // =========================
-      // TODO:
+      // 🚀 NEXT: billing logic
       // await applyBilling(TransactionReference, Amount);
 
       return res.status(200).send("OK");
