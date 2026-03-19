@@ -32,7 +32,8 @@ router.post(
       const amount = (plan.price_cents / 100).toFixed(2);
 
       const transactionReference = `${user.userId}_${planCode}_${Date.now()}`;
-      const bankReference = `YOUSCAN-${Date.now()}`;
+      const bankReference = `YS-${Date.now().toString().slice(-10)}`;
+      console.log("BankReference:", bankReference, "Length:", bankReference.length);
 
       const successUrl = "https://youscan.addvision.co.za/payment-return";
       const cancelUrl = "https://youscan.addvision.co.za/payment-cancelled";
