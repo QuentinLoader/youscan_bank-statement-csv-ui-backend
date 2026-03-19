@@ -38,6 +38,7 @@ router.post(
         String(TransactionReference).trim() +
         String(Amount).trim() +
         String(Status).trim() +
+        String(payload.IsTest).trim() +   // 🔥 CRITICAL FIX
         String(process.env.OZOW_PRIVATE_KEY).trim();
 
       console.log("WEBHOOK HASH STRING:", stringToHash);
