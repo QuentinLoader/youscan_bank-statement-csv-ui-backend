@@ -17,19 +17,32 @@ router.use(
 );
 
 /**
- * ✅ THE "FIX": Dynamic Field Hashing
- * Ozow's Notify Hash is built by concatenating ALL values in the order 
- * they arrive in the body (excluding the Hash key itself).
+ * ✅ THE FIX: Strict Field Hashing
+ * Ozow's Notify signature only uses a specific set of fields.
+ * We must ignore extra fields like 'BankName' or 'SubAccountCode'.
  */
-function buildOzowNotifyHash(rawBody, privateKey) {
-  const params = new URLSearchParams(rawBody);
+function buildOzowNotifyHash(payload, privateKey) {
+  // These are the ONLY fields Ozow uses for the Notify hash in this exact order
+  const hashKeys = [
+    "SiteCode",
+    "TransactionId",
+    "TransactionReference",
+    "Amount",
+    "Status",
+    "CurrencyCode",
+    "IsTest",
+    "StatusMessage"
+  ];
+
   let hashString = "";
 
-  // 1. Concat all values in order (except the Hash)
-  for (const [key, value] of params.entries()) {
-    if (key.toLowerCase() === "hash") continue;
-    hashString += value;
-  }
+  // 1. Concat ONLY the specified values
+  hashKeys.forEach(key => {
+    const value = payload[key];
+    if (value !== undefined && value !== null) {
+      hashString += value;
+    }
+  });
 
   // 2. Add PrivateKey at the end
   hashString += privateKey;
@@ -55,7 +68,8 @@ router.post("/", async (req, res) => {
     const { Status, TransactionReference, Hash, Amount, TransactionId } = payload;
 
     // 1. Signature Verification
-    const generatedHash = buildOzowNotifyHash(req.rawBody, process.env.OZOW_PRIVATE_KEY);
+    // Pass the 'payload' object instead of 'rawBody' for cleaner processing
+    const generatedHash = buildOzowNotifyHash(payload, process.env.OZOW_PRIVATE_KEY);
     const ozowHash = String(Hash).trim().toLowerCase();
 
     if (generatedHash !== ozowHash) {
@@ -73,8 +87,7 @@ router.post("/", async (req, res) => {
       return res.status(200).send("OK");
     }
 
-    // 3. Database Operations (TransactionReference parsing)
-    // Ref Format: userId_planCode_timestamp
+    // 3. Database Operations
     const parts = TransactionReference.split("_");
     const userId = parts[0];
     const planCode = parts[1];
@@ -84,7 +97,7 @@ router.post("/", async (req, res) => {
       return res.status(400).send("Bad Ref");
     }
 
-    // Idempotency check: Don't double-count the same Ozow TransID
+    // Idempotency check
     const duplicate = await client.query(
       "SELECT id FROM payments WHERE reference = $1 OR gateway_id = $2",
       [TransactionReference, TransactionId]
@@ -97,13 +110,11 @@ router.post("/", async (req, res) => {
 
     await client.query("BEGIN");
 
-    // Map your plans to credits
     let creditsToAdd = 0;
     if (planCode === "PAYG_10") creditsToAdd = 10;
     else if (planCode === "MONTHLY_25") creditsToAdd = 25;
     else if (planCode === "PRO_YEAR_UNLIMITED") creditsToAdd = 999999;
 
-    // Update User
     await client.query(
       `UPDATE users 
        SET credits_remaining = COALESCE(credits_remaining, 0) + $1,
@@ -113,7 +124,6 @@ router.post("/", async (req, res) => {
       [creditsToAdd, planCode, userId]
     );
 
-    // Record Payment
     await client.query(
       `INSERT INTO payments (user_id, reference, gateway_id, amount, status, plan_code)
        VALUES ($1, $2, $3, $4, $5, $6)`,
