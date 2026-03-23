@@ -1,8 +1,6 @@
 // ==========================================
-// 🔥 SERVER BUILD
+// 🔥 SERVER BUILD: 2026-03-23-FINAL-STABLE
 // ==========================================
-
-console.log("🔥 SERVER BUILD ID: 2026-03-03-OZOW-STABLE-CORS-FIX-V2");
 
 import dotenv from "dotenv";
 dotenv.config();
@@ -12,14 +10,11 @@ import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 
-// Webhook (must come before JSON middleware)
+// Route & Webhook Imports
 import ozowWebhook from "./webhooks/ozow.webhook.js";
-
-// Routes
+import ozowPaymentRoutes from "./routes/ozow.payment.routes.js";
 import authRoutes from "./routes/auth.routes.js";
 import usageRoutes from "./routes/usage.routes.js";
-import billingRoutes from "./routes/billing.routes.js";
-import ozowPaymentRoutes from "./routes/ozow.payment.routes.js";
 import { router as parseRoute } from "./routes/parse.js";
 import { PRICING } from "./config/pricing.js";
 
@@ -27,30 +22,24 @@ const app = express();
 app.set("trust proxy", 1);
 
 /* =========================================
-   CORS (MUST BE FIRST MIDDLEWARE)
+   CORS CONFIGURATION
 ========================================= */
-
 app.use(
   cors({
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
-
-      // Production frontend
-      if (origin === "https://youscan.addvision.co.za") {
-        return callback(null, true);
-      }
-
-      // Lovable preview domains
+      const allowedOrigins = [
+        "https://youscan.addvision.co.za",
+        "http://localhost:3000" // Added for local testing
+      ];
+      
       if (
-        origin.endsWith(".lovable.app") ||
+        allowedOrigins.includes(origin) || 
+        origin.endsWith(".lovable.app") || 
         origin.endsWith(".lovableproject.com")
       ) {
         return callback(null, true);
       }
-
-      console.warn("Blocked by CORS:", origin);
-
-      // DO NOT throw error — just reject
       return callback(null, false);
     },
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -59,55 +48,42 @@ app.use(
   })
 );
 
-// Proper preflight support
 app.options("*", cors());
 
 /* =========================================
-   OZOW WEBHOOK (RAW BODY SAFE)
+   OZOW WEBHOOK (MUST BE BEFORE JSON PARSER)
 ========================================= */
 app.use("/ozow/webhook", ozowWebhook);
 
 /* =========================================
-   SECURITY
+   STANDARD MIDDLEWARE
 ========================================= */
 app.use(helmet());
+app.use(express.json());
 
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: 500, // Increased for production stability
 });
-
 app.use(globalLimiter);
 
 /* =========================================
-   JSON PARSER (AFTER WEBHOOK)
+   ROUTES
 ========================================= */
-app.use(express.json());
 
-/* =========================================
-   PAYMENT ROUTES
-========================================= */
+// Payment Routes (Handles /billing/create-ozow-payment)
 app.use("/billing", ozowPaymentRoutes);
 
-/* =========================================
-   CORE ROUTES
-========================================= */
-
-app.get("/", (req, res) =>
-  res.send("YouScan Engine: Production Billing Active")
-);
-
-app.get("/pricing", (req, res) => {
-  res.json(PRICING);
-});
-
+// Core Logic Routes
 app.use("/auth", authRoutes);
 app.use("/usage", usageRoutes);
-app.use("/billing", billingRoutes);
 app.use("/parse", parseRoute);
 
+app.get("/", (req, res) => res.send("YouScan Engine: Billing Active"));
+app.get("/pricing", (req, res) => res.json(PRICING));
+
 /* =========================================
-   404 HANDLER
+   ERROR HANDLERS
 ========================================= */
 app.use((req, res) => {
   res.status(404).json({
@@ -116,9 +92,6 @@ app.use((req, res) => {
   });
 });
 
-/* =========================================
-   GLOBAL ERROR HANDLER
-========================================= */
 app.use((err, req, res, next) => {
   console.error("Global Error:", err.stack);
   res.status(500).json({
@@ -127,11 +100,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-/* =========================================
-   START SERVER
-========================================= */
 const PORT = process.env.PORT || 8080;
-
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 YouScan running on port ${PORT}`);
 });
