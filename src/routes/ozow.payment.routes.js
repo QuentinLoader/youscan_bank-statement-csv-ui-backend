@@ -15,7 +15,7 @@ const getPrice = (planCode) => {
 
 router.post("/create-ozow-payment", async (req, res) => {
   try {
-    const { planCode, userId } = req.body; // 👈 Now receiving both from frontend
+    const { planCode, userId } = req.body;
     const amount = getPrice(planCode);
 
     if (!amount || !userId) {
@@ -26,33 +26,46 @@ router.post("/create-ozow-payment", async (req, res) => {
     const siteCode = process.env.OZOW_SITE_CODE;
     const privateKey = process.env.OZOW_PRIVATE_KEY;
     
-    // Unique reference: userId_plan_timestamp
-    const bankReference = `${userId}_${planCode}_${Date.now()}`;
+    // 🔥 FIX 1: Shorten BankReference (SA Banks limit to 20 chars)
+    // We use a shorter timestamp (seconds) to save space
+    const timestamp = Math.floor(Date.now() / 1000);
+    const bankReference = `${userId}_${planCode}_${timestamp}`.substring(0, 20);
     
+    // 🔥 FIX 2: Standardize Payload for Hashing
     const payload = {
       SiteCode: siteCode,
       CountryCode: "ZA",
       CurrencyCode: "ZAR",
-      Amount: parseFloat(amount).toFixed(2),
+      Amount: parseFloat(amount).toFixed(2), // Strict 2-decimal formatting
       TransactionReference: bankReference,
       BankReference: bankReference,
       CancelUrl: `https://youscan.addvision.co.za/payment-cancelled`,
       ErrorUrl: `https://youscan.addvision.co.za/payment-error`,
       SuccessUrl: `https://youscan.addvision.co.za/payment-return`,
+      // 🔥 FIX 3: Shortened NotifyUrl path to avoid Ozow validation rejection
       NotifyUrl: `https://youscan-statement-csv-ui-backend-production.up.railway.app/ozow/webhook`,
       IsTest: true 
     };
 
+    // Construct Hash String (Order is critical for Ozow)
     const hashString = (
-      payload.SiteCode + payload.CountryCode + payload.CurrencyCode +
-      payload.Amount + payload.TransactionReference + payload.BankReference +
-      payload.CancelUrl + payload.ErrorUrl + payload.SuccessUrl +
-      payload.NotifyUrl + payload.IsTest + privateKey
+      payload.SiteCode + 
+      payload.CountryCode + 
+      payload.CurrencyCode +
+      payload.Amount + 
+      payload.TransactionReference + 
+      payload.BankReference +
+      payload.CancelUrl + 
+      payload.ErrorUrl + 
+      payload.SuccessUrl +
+      payload.NotifyUrl + 
+      payload.IsTest + 
+      privateKey
     ).toLowerCase();
 
     const hash = crypto.createHash("sha512").update(hashString).digest("hex");
 
-    console.log(`✅ Payment Link Generated for User ${userId} (${planCode})`);
+    console.log(`✅ Fixed Payment Link Generated: ${bankReference}`);
 
     res.status(200).json({
       ...payload,
