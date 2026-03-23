@@ -26,12 +26,10 @@ router.post("/create-ozow-payment", async (req, res) => {
     const siteCode = process.env.OZOW_SITE_CODE;
     const privateKey = process.env.OZOW_PRIVATE_KEY;
     
-    // 🔥 FIX 1: Shorten BankReference (SA Banks limit to 20 chars)
-    // We use a shorter timestamp (seconds) to save space
+    // FIX 1: Shorten BankReference (SA Banks limit to 20 chars)
     const timestamp = Math.floor(Date.now() / 1000);
     const bankReference = `${userId}_${planCode}_${timestamp}`.substring(0, 20);
     
-    // 🔥 FIX 2: Standardize Payload for Hashing
     const payload = {
       SiteCode: siteCode,
       CountryCode: "ZA",
@@ -42,8 +40,8 @@ router.post("/create-ozow-payment", async (req, res) => {
       CancelUrl: `https://youscan.addvision.co.za/payment-cancelled`,
       ErrorUrl: `https://youscan.addvision.co.za/payment-error`,
       SuccessUrl: `https://youscan.addvision.co.za/payment-return`,
-      // 🔥 FIX 3: Shortened NotifyUrl path to avoid Ozow validation rejection
-      NotifyUrl: `https://youscan-statement-csv-ui-backend-production.up.railway.app/ozow/webhook`,
+      // 🔥 FIX 2: Shortened NotifyUrl to bypass character limit validation
+      NotifyUrl: `https://youscan-statement-csv-ui-backend-production.up.railway.app/ozow`,
       IsTest: true 
     };
 
@@ -65,7 +63,7 @@ router.post("/create-ozow-payment", async (req, res) => {
 
     const hash = crypto.createHash("sha512").update(hashString).digest("hex");
 
-    console.log(`✅ Fixed Payment Link Generated: ${bankReference}`);
+    console.log(`✅ Final Optimized Payment Link Generated: ${bankReference}`);
 
     res.status(200).json({
       ...payload,

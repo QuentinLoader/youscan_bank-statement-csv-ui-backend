@@ -53,7 +53,7 @@ app.options("*", cors());
 /* =========================================
    OZOW WEBHOOK (MUST BE BEFORE JSON PARSER)
 ========================================= */
-app.use("/ozow/webhook", ozowWebhook);
+app.use("/ozow", ozowWebhook);
 
 /* =========================================
    STANDARD MIDDLEWARE
