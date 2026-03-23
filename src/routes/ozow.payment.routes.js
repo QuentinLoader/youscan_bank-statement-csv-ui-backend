@@ -4,7 +4,6 @@ import pool from "../config/db.js";
 
 const router = express.Router();
 
-// Helper to get price based on your pricing config
 const getPrice = (planCode) => {
   const prices = {
     'PAYG_10': 5.00,
@@ -14,31 +13,20 @@ const getPrice = (planCode) => {
   return prices[planCode] || null;
 };
 
-/**
- * ✅ CREATE OZOW PAYMENT
- * Now only requires planCode from frontend.
- */
 router.post("/create-ozow-payment", async (req, res) => {
   try {
-    // 1. Get data from request
-    const { planCode } = req.body;
-    
-    // 2. Fallback for userId (Try to get it from your auth middleware if available)
-    // For now, we will expect it in the body OR you can hardcode a test ID.
-    const userId = req.body.userId || req.user?.id; 
-
+    const { planCode, userId } = req.body; // 👈 Now receiving both from frontend
     const amount = getPrice(planCode);
 
     if (!amount || !userId) {
-      console.error("❌ Missing Data:", { planCode, amount, userId });
-      return res.status(400).json({ 
-        error: "MISSING_REQUIRED_FIELDS",
-        details: !amount ? "Invalid Plan Code" : "User ID not found" 
-      });
+      console.error("❌ Validation Failed:", { planCode, userId });
+      return res.status(400).json({ error: "INVALID_REQUEST_DATA" });
     }
 
     const siteCode = process.env.OZOW_SITE_CODE;
     const privateKey = process.env.OZOW_PRIVATE_KEY;
+    
+    // Unique reference: userId_plan_timestamp
     const bankReference = `${userId}_${planCode}_${Date.now()}`;
     
     const payload = {
@@ -56,21 +44,15 @@ router.post("/create-ozow-payment", async (req, res) => {
     };
 
     const hashString = (
-      payload.SiteCode +
-      payload.CountryCode +
-      payload.CurrencyCode +
-      payload.Amount +
-      payload.TransactionReference +
-      payload.BankReference +
-      payload.CancelUrl +
-      payload.ErrorUrl +
-      payload.SuccessUrl +
-      payload.NotifyUrl +
-      payload.IsTest +
-      privateKey
+      payload.SiteCode + payload.CountryCode + payload.CurrencyCode +
+      payload.Amount + payload.TransactionReference + payload.BankReference +
+      payload.CancelUrl + payload.ErrorUrl + payload.SuccessUrl +
+      payload.NotifyUrl + payload.IsTest + privateKey
     ).toLowerCase();
 
     const hash = crypto.createHash("sha512").update(hashString).digest("hex");
+
+    console.log(`✅ Payment Link Generated for User ${userId} (${planCode})`);
 
     res.status(200).json({
       ...payload,
@@ -78,7 +60,7 @@ router.post("/create-ozow-payment", async (req, res) => {
     });
 
   } catch (error) {
-    console.error("❌ Failed to initiate Ozow payment:", error);
+    console.error("❌ Ozow Error:", error);
     res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
   }
 });
