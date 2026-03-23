@@ -16,7 +16,7 @@ const app = express();
  * =========================================
  * This allows raw body parsing for hash verification
  */
-app.use("/ozow/webhook", ozowWebhook);
+app.use("/ozow", ozowWebhook)
 
 /**
  * MIDDLEWARE
