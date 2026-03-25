@@ -94,7 +94,8 @@ async function applyPlanOrCredits(client, userId, planCode) {
     await client.query(
       `
       UPDATE users
-      SET plan_code = $2
+      SET plan_code = $2,
+      credits_remaining = NULL
       WHERE id = $1
       `,
       [Number(userId), planCode]
