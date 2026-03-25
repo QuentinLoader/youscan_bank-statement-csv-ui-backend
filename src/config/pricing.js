@@ -16,7 +16,7 @@ export const PRICING = {
       name: "Pay-as-YouScan",
       type: "credits",
       credits: 10,
-      price_cents: 29500,
+      price_cents: 2950,
       recurring: false
     },
 
