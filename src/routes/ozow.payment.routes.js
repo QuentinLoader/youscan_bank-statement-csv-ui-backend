@@ -109,7 +109,7 @@ router.post(
         NotifyURL:
           "https://youscan-statement-csv-ui-backend-production.up.railway.app/ozow/webhook",
 
-        IsTest: "true"
+        IsTest: "false"
       };
 
       console.log("FORM VALUES:");
