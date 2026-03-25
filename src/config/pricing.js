@@ -26,7 +26,7 @@ export const PRICING = {
       type: "subscription",
       billing_cycle: "monthly",
       credits_per_cycle: 25,
-      price_cents: 4850,
+      price_cents: 500,
       recurring: true
     },
 
