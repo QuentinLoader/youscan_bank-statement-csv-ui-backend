@@ -127,20 +127,26 @@ router.post(
       const isTest = String(payload.IsTest || "").toLowerCase() === "true";
 
       // ✅ FIXED: Do NOT early return for sandbox
-      if (!isTest) {
+      
         const expectedHash = generateOzowWebhookHash(payload, privateKey);
         const receivedHash = String(payload.Hash || "").toLowerCase();
 
         console.log("EXPECTED HASH:", expectedHash);
         console.log("RECEIVED HASH:", receivedHash);
 
-        if (expectedHash !== receivedHash) {
-          console.error("Invalid webhook hash");
-          return res.status(400).send("INVALID_HASH");
+        if (!isTest) {
+          if (expectedHash !== receivedHash) {
+           console.error("Invalid webhook hash");
+           return res.status(400).send("INVALID_HASH");
         }
       } else {
-        console.log("Sandbox callback — skipping strict hash validation");
+        console.log("Sandbox callback — skipping strict hash enforcement");
+        if (expectedHash !== receivedHash) {
+          console.warn("SANDBOX HASH MISMATCH DETECTED");
+      } else {
+          console.log("Sandbox hash verified successfully");
       }
+    }  
 
       const {
         TransactionId,
