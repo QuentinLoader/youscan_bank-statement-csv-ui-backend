@@ -32,7 +32,7 @@ function generateOzowWebhookHash(data, privateKey) {
   );
 
   const rawString = normalizedParts.join("");
-  const hashString = rawString.toLowerCase();
+  const hashString = rawString;
 
   console.log("WEBHOOK HASH PARTS:");
   normalizedParts.forEach((p, i) => {
