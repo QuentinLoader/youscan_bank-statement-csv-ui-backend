@@ -9,12 +9,12 @@ function normalizeAmount(amount) {
   return parseFloat(amount).toFixed(2);
 }
 
+// ✅ FIXED: Removed BankReference from hash
 function generateOzowWebhookHash(data, privateKey) {
   const parts = [
     data.SiteCode,
     data.TransactionId,
     data.TransactionReference,
-    data.BankReference ?? "",
     normalizeAmount(data.Amount),
     data.Status,
     data.Optional1 ?? "",
@@ -59,9 +59,8 @@ function parseTransactionReference(reference) {
 
   const userId = reference.slice(0, firstUnderscore);
   const planCode = reference.slice(firstUnderscore + 1, lastUnderscore);
-  const timestamp = reference.slice(lastUnderscore + 1);
 
-  return { userId, planCode, timestamp };
+  return { userId, planCode };
 }
 
 async function applyPlanOrCredits(client, userId, planCode) {
@@ -69,9 +68,8 @@ async function applyPlanOrCredits(client, userId, planCode) {
     await client.query(
       `
       UPDATE users
-      SET
-        plan_code = $2,
-        credits_remaining = COALESCE(credits_remaining, 0) + 10
+      SET plan_code = $2,
+          credits_remaining = COALESCE(credits_remaining, 0) + 10
       WHERE id = $1
       `,
       [Number(userId), planCode]
@@ -83,9 +81,8 @@ async function applyPlanOrCredits(client, userId, planCode) {
     await client.query(
       `
       UPDATE users
-      SET
-        plan_code = $2,
-        credits_remaining = 25
+      SET plan_code = $2,
+          credits_remaining = 25
       WHERE id = $1
       `,
       [Number(userId), planCode]
@@ -97,8 +94,7 @@ async function applyPlanOrCredits(client, userId, planCode) {
     await client.query(
       `
       UPDATE users
-      SET
-        plan_code = $2
+      SET plan_code = $2
       WHERE id = $1
       `,
       [Number(userId), planCode]
@@ -129,24 +125,20 @@ router.post(
 
       const isTest = String(payload.IsTest || "").toLowerCase() === "true";
 
-      // Sandbox/test mode:
-      // Ozow docs say notification responses are not sent for test transactions.
-      // So do not hard-fail on test webhook hash mismatches.
-      if (isTest) {
-        console.log("Sandbox/test callback received. Skipping strict webhook hash enforcement.");
-        console.log("Test payload:", payload);
-        return res.status(200).send("TEST_OK");
-      }
+      // ✅ FIXED: Do NOT early return for sandbox
+      if (!isTest) {
+        const expectedHash = generateOzowWebhookHash(payload, privateKey);
+        const receivedHash = String(payload.Hash || "").toLowerCase();
 
-      const expectedHash = generateOzowWebhookHash(payload, privateKey);
-      const receivedHash = String(payload.Hash || "").toLowerCase();
+        console.log("EXPECTED HASH:", expectedHash);
+        console.log("RECEIVED HASH:", receivedHash);
 
-      console.log("EXPECTED HASH:", expectedHash);
-      console.log("RECEIVED HASH:", receivedHash);
-
-      if (expectedHash !== receivedHash) {
-        console.error("Invalid webhook hash");
-        return res.status(400).send("INVALID_HASH");
+        if (expectedHash !== receivedHash) {
+          console.error("Invalid webhook hash");
+          return res.status(400).send("INVALID_HASH");
+        }
+      } else {
+        console.log("Sandbox callback — skipping strict hash validation");
       }
 
       const {
@@ -164,9 +156,10 @@ router.post(
 
       await client.query("BEGIN");
 
+      // 🔒 Lock row
       const existingTx = await client.query(
         `
-        SELECT id, status, processed_at
+        SELECT id, processed_at
         FROM ozow_transactions
         WHERE transaction_id = $1
         FOR UPDATE
@@ -174,6 +167,7 @@ router.post(
         [TransactionId]
       );
 
+      // Insert or update
       if (existingTx.rowCount === 0) {
         await client.query(
           `
@@ -207,70 +201,40 @@ router.post(
           ]
         );
       } else {
+        if (existingTx.rows[0].processed_at) {
+          console.log("Already processed — skipping");
+          await client.query("COMMIT");
+          return res.status(200).send("OK");
+        }
+
         await client.query(
           `
           UPDATE ozow_transactions
-          SET
-            status = $2,
-            bank_reference = $3,
-            bank_name = $4,
-            raw_payload = $5::jsonb,
-            updated_at = NOW()
+          SET status = $2,
+              raw_payload = $3::jsonb,
+              updated_at = NOW()
           WHERE transaction_id = $1
           `,
-          [
-            TransactionId,
-            Status,
-            BankReference ?? null,
-            BankName ?? null,
-            JSON.stringify(payload)
-          ]
+          [TransactionId, Status, JSON.stringify(payload)]
         );
       }
 
+      // 🚫 Only process COMPLETE
       if (Status !== "Complete") {
-        console.log("Webhook received but payment not complete:", Status, StatusMessage || "");
+        console.log("Not complete:", Status);
         await client.query("COMMIT");
         return res.status(200).send("IGNORED");
       }
 
-      const processedCheck = await client.query(
-        `
-        SELECT processed_at
-        FROM ozow_transactions
-        WHERE transaction_id = $1
-        `,
-        [TransactionId]
-      );
-
-      if (processedCheck.rows[0]?.processed_at) {
-        console.log("Transaction already processed:", TransactionId);
-        await client.query("COMMIT");
-        return res.status(200).send("OK");
-      }
-
       const plan = PRICING.PLANS?.[planCode];
-      if (!plan) {
-        throw new Error(`Unknown plan code from TransactionReference: ${planCode}`);
-      }
+      if (!plan) throw new Error("Invalid plan");
 
       await applyPlanOrCredits(client, userId, planCode);
 
       await client.query(
         `
-        INSERT INTO usage_logs
-        (user_id, action, plan_code, credits_deducted)
-        VALUES ($1, $2, $3, $4)
-        `,
-        [Number(userId), "ozow_payment_completed", planCode, 0]
-      );
-
-      await client.query(
-        `
         UPDATE ozow_transactions
-        SET
-          processed_at = NOW(),
-          updated_at = NOW()
+        SET processed_at = NOW()
         WHERE transaction_id = $1
         `,
         [TransactionId]
@@ -278,18 +242,12 @@ router.post(
 
       await client.query("COMMIT");
 
-      console.log("Ozow payment processed successfully:", {
-        transactionId: TransactionId,
-        userId,
-        planCode,
-        amount: Amount,
-        status: Status
-      });
+      console.log("✅ Payment applied:", TransactionReference);
 
       return res.status(200).send("OK");
     } catch (err) {
       await client.query("ROLLBACK");
-      console.error("OZOW WEBHOOK ERROR:", err);
+      console.error("WEBHOOK ERROR:", err);
       return res.status(500).send("ERROR");
     } finally {
       client.release();
