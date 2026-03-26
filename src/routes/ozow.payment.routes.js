@@ -168,12 +168,13 @@ router.post(
           amount,
           currency_code,
           status,
+          raw_payload,
           created_at,
           updated_at
       )
         VALUES ($1, $2, $2, $3, $4, 'ZAR', 'Pending', NOW(), NOW())
         `,
-        [user.userId, transactionReference, planCode, amount]
+        [user.userId, transactionReference, planCode, amount,JSON.stringify(payload)]
       );
 
       const paymentForm = `
