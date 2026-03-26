@@ -171,12 +171,18 @@ router.post(
           raw_payload,
           created_at,
           updated_at
-      )
-        VALUES ($1, $2, $2, $3, $4, 'ZAR', 'Pending', NOW(), NOW())
+        )
+        VALUES ($1, $2, $2, $3, $4, $5, 'Pending', $6, NOW(), NOW())
         `,
-        [user.userId, transactionReference, planCode, amount,JSON.stringify(payload)]
-      );
-
+        [
+          user.userId,                 // $1
+          transactionReference,        // $2
+          planCode,                    // $3
+          amount,                      // $4
+          "ZAR",                       // $5  ✅ moved here
+          JSON.stringify(payload)      // $6  ✅ moved here
+        ]
+);
       const paymentForm = `
         <html>
           <body onload="document.forms[0].submit()">
