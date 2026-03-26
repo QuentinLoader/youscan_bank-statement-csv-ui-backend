@@ -9,7 +9,6 @@ function normalizeAmount(amount) {
   return parseFloat(amount).toFixed(2);
 }
 
-// ✅ FIXED: Removed BankReference from hash
 function generateOzowWebhookHash(data, privateKey) {
   const parts = [
     data.SiteCode,
@@ -27,7 +26,7 @@ function generateOzowWebhookHash(data, privateKey) {
     privateKey
   ];
 
-  const normalizedParts = parts.map(v =>
+  const normalizedParts = parts.map((v) =>
     v === undefined || v === null ? "" : String(v)
   );
 
@@ -53,7 +52,11 @@ function parseTransactionReference(reference) {
   const firstUnderscore = reference.indexOf("_");
   const lastUnderscore = reference.lastIndexOf("_");
 
-  if (firstUnderscore === -1 || lastUnderscore === -1 || firstUnderscore === lastUnderscore) {
+  if (
+    firstUnderscore === -1 ||
+    lastUnderscore === -1 ||
+    firstUnderscore === lastUnderscore
+  ) {
     throw new Error(`Invalid TransactionReference format: ${reference}`);
   }
 
@@ -95,7 +98,7 @@ async function applyPlanOrCredits(client, userId, planCode) {
       `
       UPDATE users
       SET plan_code = $2,
-      credits_remaining = NULL
+          credits_remaining = NULL
       WHERE id = $1
       `,
       [Number(userId), planCode]
@@ -126,26 +129,24 @@ router.post(
 
       const isTest = String(payload.IsTest || "").toLowerCase() === "true";
 
-      // ✅ FIXED: Do NOT early return for sandbox
-      
-        const expectedHash = generateOzowWebhookHash(payload, privateKey);
-        const receivedHash = String(payload.Hash || "").toLowerCase();
+      const expectedHash = generateOzowWebhookHash(payload, privateKey);
+      const receivedHash = String(payload.Hash || "").toLowerCase();
 
-        console.log("EXPECTED HASH:", expectedHash);
-        console.log("RECEIVED HASH:", receivedHash);
+      console.log("EXPECTED HASH:", expectedHash);
+      console.log("RECEIVED HASH:", receivedHash);
 
-        if (!isTest) {
-          if (expectedHash !== receivedHash) {
-           console.error("⚠️ Hash mismatch (LIVE) — continuing processing");
-          }
+      if (!isTest) {
+        if (expectedHash !== receivedHash) {
+          console.error("⚠️ Hash mismatch (LIVE) — continuing processing");
+        }
       } else {
         console.log("Sandbox callback — skipping strict hash enforcement");
         if (expectedHash !== receivedHash) {
           console.warn("SANDBOX HASH MISMATCH DETECTED");
-      } else {
+        } else {
           console.log("Sandbox hash verified successfully");
+        }
       }
-    }  
 
       const {
         TransactionId,
@@ -154,27 +155,33 @@ router.post(
         Amount,
         Status,
         CurrencyCode,
-        StatusMessage,
         BankName
       } = payload;
+
+      if (!TransactionReference) {
+        console.error("Missing TransactionReference");
+        return res.status(400).send("MISSING_TRANSACTION_REFERENCE");
+      }
 
       const { userId, planCode } = parseTransactionReference(TransactionReference);
 
       await client.query("BEGIN");
 
-      // 🔒 Lock row
+      // Lock by OUR stable key: transaction_reference
       const existingTx = await client.query(
         `
-        SELECT id, processed_at
+        SELECT id, processed_at, status
         FROM ozow_transactions
         WHERE transaction_reference = $1
+        ORDER BY created_at ASC
+        LIMIT 1
         FOR UPDATE
         `,
-        [TransactionId]
+        [TransactionReference]
       );
 
-      // Insert or update
       if (existingTx.rowCount === 0) {
+        // Fallback only if the create-payment row somehow never got inserted
         await client.query(
           `
           INSERT INTO ozow_transactions (
@@ -188,26 +195,30 @@ router.post(
             bank_reference,
             bank_name,
             raw_payload,
+            processed_at,
             created_at,
             updated_at
           )
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,NOW(),NOW())
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,NOW(),NOW())
           `,
           [
-            TransactionId,
+            TransactionId || TransactionReference,
             TransactionReference,
             Number(userId),
             planCode,
             normalizeAmount(Amount),
-            CurrencyCode,
+            CurrencyCode || "ZAR",
             Status,
             BankReference ?? null,
             BankName ?? null,
-            JSON.stringify(payload)
+            JSON.stringify(payload),
+            Status === "Complete" || Status === "Cancelled" || Status === "Failed"
+              ? new Date()
+              : null
           ]
         );
       } else {
-        if (existingTx.rows[0].processed_at) {
+        if (existingTx.rows[0].processed_at && Status === "Complete") {
           console.log("Already processed — skipping");
           await client.query("COMMIT");
           return res.status(200).send("OK");
@@ -216,16 +227,33 @@ router.post(
         await client.query(
           `
           UPDATE ozow_transactions
-          SET status = $2,
-              raw_payload = $3::jsonb,
+          SET transaction_id = $2,
+              status = $3,
+              amount = $4,
+              currency_code = $5,
+              bank_reference = $6,
+              bank_name = $7,
+              raw_payload = $8::jsonb,
+              processed_at = CASE
+                WHEN $3 IN ('Complete', 'Cancelled', 'Failed', 'Error') THEN COALESCE(processed_at, NOW())
+                ELSE processed_at
+              END,
               updated_at = NOW()
           WHERE transaction_reference = $1
           `,
-          [TransactionReference, Status, JSON.stringify(payload)]
+          [
+            TransactionReference,
+            TransactionId || TransactionReference,
+            Status,
+            normalizeAmount(Amount),
+            CurrencyCode || "ZAR",
+            BankReference ?? null,
+            BankName ?? null,
+            JSON.stringify(payload)
+          ]
         );
       }
 
-      // 🚫 Only process COMPLETE
       if (Status !== "Complete") {
         console.log("Not complete:", Status);
         await client.query("COMMIT");
@@ -233,14 +261,17 @@ router.post(
       }
 
       const plan = PRICING.PLANS?.[planCode];
-      if (!plan) throw new Error("Invalid plan");
+      if (!plan) {
+        throw new Error(`Invalid plan: ${planCode}`);
+      }
 
       await applyPlanOrCredits(client, userId, planCode);
 
       await client.query(
         `
         UPDATE ozow_transactions
-        SET processed_at = NOW()
+        SET processed_at = COALESCE(processed_at, NOW()),
+            updated_at = NOW()
         WHERE transaction_reference = $1
         `,
         [TransactionReference]
