@@ -17,6 +17,7 @@ import authRoutes from "./routes/auth.routes.js";
 import usageRoutes from "./routes/usage.routes.js";
 import { router as parseRoute } from "./routes/parse.js";
 import { PRICING } from "./config/pricing.js";
+import adminRoutes from "./routes/admin.js";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -54,6 +55,11 @@ app.options("*", cors());
    OZOW WEBHOOK (MUST BE BEFORE JSON PARSER)
 ========================================= */
 app.use("/ozow", ozowWebhook);
+
+/* =========================================
+   ADMIN ROUTE
+========================================= */
+app.use("/api/admin", adminRoutes);
 
 /* =========================================
    STANDARD MIDDLEWARE
