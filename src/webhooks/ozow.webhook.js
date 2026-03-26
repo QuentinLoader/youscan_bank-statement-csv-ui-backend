@@ -167,7 +167,7 @@ router.post(
         `
         SELECT id, processed_at
         FROM ozow_transactions
-        WHERE transaction_id = $1
+        WHERE transaction_reference = $1
         FOR UPDATE
         `,
         [TransactionId]
@@ -219,9 +219,9 @@ router.post(
           SET status = $2,
               raw_payload = $3::jsonb,
               updated_at = NOW()
-          WHERE transaction_id = $1
+          WHERE transaction_reference = $1
           `,
-          [TransactionId, Status, JSON.stringify(payload)]
+          [TransactionReference, Status, JSON.stringify(payload)]
         );
       }
 
@@ -241,9 +241,9 @@ router.post(
         `
         UPDATE ozow_transactions
         SET processed_at = NOW()
-        WHERE transaction_id = $1
+        WHERE transaction_reference = $1
         `,
-        [TransactionId]
+        [TransactionReference]
       );
 
       await client.query("COMMIT");
