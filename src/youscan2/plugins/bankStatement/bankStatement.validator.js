@@ -17,10 +17,8 @@ function looksLikeDebit(description = "") {
   const debitSignals = [
     "fee",
     "charge",
-    "payment dt",
-    "digital pmt",
-    "debit",
     "withdrawal",
+    "debit",
     "proof of pmt email",
     "admin charge",
     "monthly acc fee",
@@ -113,17 +111,6 @@ export async function validateBankStatement(normalized) {
       continue;
     }
 
-    if (amount === 0) {
-      issues.push({
-        severity: "warning",
-        issueType: "zero_amount",
-        message: "Transaction amount is zero. This may indicate a parsing error.",
-        rowIndex: i,
-        metadata: { transaction: tx },
-      });
-      warningCount++;
-    }
-
     if (!isNumber(balance)) {
       issues.push({
         severity: "warning",
@@ -164,14 +151,9 @@ export async function validateBankStatement(normalized) {
       const prev = transactions[i - 1];
 
       if (isNumber(prev?.balance) && isNumber(balance) && isNumber(amount)) {
-        const expectedIfCredit = round2(prev.balance + amount);
-        const expectedIfDebit = round2(prev.balance - Math.abs(amount));
-        const actual = round2(balance);
+        const diff = round2(balance - prev.balance);
 
-        const matchesCredit = round2(expectedIfCredit) === actual;
-        const matchesDebit = round2(expectedIfDebit) === actual;
-
-        if (!matchesCredit && !matchesDebit) {
+        if (diff !== 0 && round2(diff) !== round2(amount)) {
           issues.push({
             severity: "warning",
             issueType: "balance_continuity_mismatch",
@@ -181,6 +163,7 @@ export async function validateBankStatement(normalized) {
               previousBalance: prev.balance,
               amount,
               currentBalance: balance,
+              expectedDelta: diff,
               transaction: tx,
             },
           });
