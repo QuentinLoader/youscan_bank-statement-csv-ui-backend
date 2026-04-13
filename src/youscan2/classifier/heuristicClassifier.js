@@ -3,10 +3,9 @@
  * Heuristic document classifier
  */
 
-import { DOCUMENT_SUBTYPES, DOCUMENT_TYPES } from "../registry/documentTypes";
-import type { ClassificationResult } from "../types/classification";
+import { DOCUMENT_TYPES, DOCUMENT_SUBTYPES } from "../registry/documentTypes.js";
 
-export function heuristicClassifier(text = ""): ClassificationResult {
+export function heuristicClassifier(text = "") {
   const lower = String(text).toLowerCase();
 
   if (

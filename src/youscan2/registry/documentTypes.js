@@ -3,9 +3,7 @@
  * Document type registry
  */
 
-import type { DocumentSubtype, DocumentType } from "../types/classification";
-
-export const DOCUMENT_TYPES: Record<string, DocumentType> = {
+export const DOCUMENT_TYPES = {
   BANK_STATEMENT: "bank_statement",
   INVOICE: "invoice",
   DELIVERY_NOTE: "delivery_note",
@@ -14,7 +12,7 @@ export const DOCUMENT_TYPES: Record<string, DocumentType> = {
   UNKNOWN: "unknown",
 };
 
-export const DOCUMENT_SUBTYPES: Record<string, DocumentSubtype> = {
+export const DOCUMENT_SUBTYPES = {
   ABSA_STATEMENT: "absa_statement",
   FNB_STATEMENT: "fnb_statement",
   NEDBANK_STATEMENT: "nedbank_statement",
