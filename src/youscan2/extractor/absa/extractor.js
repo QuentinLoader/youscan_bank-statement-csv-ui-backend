@@ -2,7 +2,7 @@ import { normalizeWhitespace } from "../shared/utils.js";
 
 const DATE_AT_START_RE = /^\s*(\d{1,2}\/\d{1,2}\/\d{4})/;
 
-// ✅ FIXED: safer money token (prevents merging)
+// safer money token
 const MONEY_TOKEN_RE = /(\d{1,3}(?:[ ,]\d{3})*[.,]\d{2}-?)/g;
 
 const NOISE_PATTERNS = [
@@ -35,7 +35,7 @@ const DROP_DESCRIPTION_PATTERNS = [
   /^notific fee sms/i,
 ];
 
-// ✅ CRITICAL: stop parsing before footer pollution
+// stop parsing before footer
 function truncateAtStatementEnd(text) {
   const stopPatterns = [
     /SERVICE FEE:/i,
@@ -68,7 +68,7 @@ function cleanAbsaText(text) {
     .replace(/\r/g, "\n");
 }
 
-// ✅ FIXED: robust money normalization
+// normalize money
 function normalizeMoneyToken(raw) {
   if (!raw) return null;
 
@@ -80,10 +80,8 @@ function normalizeMoneyToken(raw) {
     s = s.slice(0, -1);
   }
 
-  // remove spaces BEFORE parsing
   s = s.replace(/\s+/g, "");
 
-  // normalize decimal
   if (s.includes(",") && !s.includes(".")) {
     s = s.replace(",", ".");
   }
@@ -145,7 +143,6 @@ function parseAbsaBlock(block, previousBalance = null) {
     amount = Number((balance - previousBalance).toFixed(2));
   }
 
-  // description boundary
   let descriptionEnd = joined.length;
   if (money.length >= 2) {
     descriptionEnd = money[money.length - 2].index;
@@ -155,10 +152,12 @@ function parseAbsaBlock(block, previousBalance = null) {
 
   let description = joined
     .slice(dateMatch[0].length, descriptionEnd)
-    .replace(/\b(Settlement|Headoffice)\b/gi, " ")
-    .replace(/\b[ACTMS]\b(?=\s*\d|$)/g, " ")
-    .replace(/SERVICE FEE:.*$/i, "") // ✅ STOP BLEED
-    .replace(/CREDIT INTEREST RATE.*$/i, "") // ✅ STOP BLEED
+    .replace(/\b(Settlement|Headoffice)\b/gi, "")
+    .replace(/\b[ACTMS]\b(?=\s*\d|$)/g, "")
+    .replace(/\b\d+\.\d{2}A\b/g, "") // OCR junk like 40.00A
+    .replace(/SERVICE FEE:.*$/i, "")
+    .replace(/CREDIT INTEREST RATE.*$/i, "")
+    .replace(/\s{2,}/g, " ")
     .trim();
 
   description = normalizeWhitespace(description);
@@ -166,7 +165,6 @@ function parseAbsaBlock(block, previousBalance = null) {
   if (!description) return null;
   if (DROP_DESCRIPTION_PATTERNS.some((re) => re.test(description))) return null;
 
-  // infer correct sign
   if (previousBalance != null && amount != null) {
     const debitCandidate = Number((previousBalance - Math.abs(amount)).toFixed(2));
     const creditCandidate = Number((previousBalance + Math.abs(amount)).toFixed(2));
@@ -180,7 +178,6 @@ function parseAbsaBlock(block, previousBalance = null) {
     }
   }
 
-  // ✅ GUARDRAILS (kill corrupted rows)
   if (!amount || !balance) return null;
 
   if (Math.abs(amount) > 100000) return null;
@@ -195,7 +192,6 @@ function parseAbsaBlock(block, previousBalance = null) {
 }
 
 export function extractAbsaTransactions(text, openingBalance = null) {
-  // ✅ APPLY TRUNCATION
   const cleaned = truncateAtStatementEnd(cleanAbsaText(text));
 
   const lines = cleaned.split("\n");
@@ -213,4 +209,15 @@ export function extractAbsaTransactions(text, openingBalance = null) {
   }
 
   return transactions;
+}
+
+// ✅ NEW: Client Name Extractor (MANDATORY FIX)
+export function extractAbsaClientName(text) {
+  const match = String(text || "").match(
+    /Cheque account statement\s+([A-Z][A-Z0-9&.,'\/\- ]+?)\s+40-\d{4}-\d{4}/i
+  );
+
+  if (!match) return null;
+
+  return match[1].trim();
 }
