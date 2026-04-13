@@ -405,34 +405,65 @@ function cleanStandardBankMoneyToken(value) {
 }
 
 /* =========================
-   FUNCTION: buildCombinedBalanceCandidate
-   PURPOSE: Extract only the final balance token from the line.
-   CRITICAL:
-   - Prefers the final money-looking token
-   - Removes leading day-column prefix like "12 " or "01 "
+   FUNCTION: normalizeStandardBankBalanceToken
+   PURPOSE:
+   Normalize a raw Standard Bank balance token before numeric parsing.
+   HANDLES:
+   - leading day/page prefix like "12 " or "01 "
+   - stray spaces
 ========================= */
-function buildCombinedBalanceCandidate(line) {
-  const raw = normalizeWhitespace(line);
+function normalizeStandardBankBalanceToken(value) {
+  let token = normalizeWhitespace(value || "");
+  if (!token) return "";
 
-  const matches = raw.match(/\d[\d\s,]*\.\d{2}-?/g);
-  if (!matches || matches.length === 0) return null;
+  token = token.replace(/^\d{1,2}\s+/, "");
+  token = token.replace(/\s+/g, "");
 
-  let candidate = matches[matches.length - 1];
-  candidate = candidate.replace(/^\d{1,2}\s+/, "");
-
-  return candidate;
+  return token;
 }
 
 /* =========================
-   FUNCTION: fixOcrBalance
+   FUNCTION: parseStandardBankBalanceToken
    PURPOSE:
-   Fix OCR-inserted extra digit in balances like:
-   1211,382.94 -> 121,382.94
-   1023,261.42 -> 023,261.42
-   NOTE:
-   - Conservative correction used only on suspicious 7+ digit whole parts
+   Parse and heuristically repair Standard Bank balance tokens.
+   REPAIRS:
+   - leading prefix column
+   - duplicated OCR digit after first 2 chars for 7+ digit whole parts
 ========================= */
-function fixOcrBalance(balance) {
+function parseStandardBankBalanceToken(value) {
+  let token = normalizeStandardBankBalanceToken(value);
+  if (!token) return null;
+
+  let negative = false;
+  if (token.endsWith("-")) {
+    negative = true;
+    token = token.slice(0, -1);
+  }
+
+  if (!/^\d[\d,]*\.\d{2}$/.test(token)) {
+    return null;
+  }
+
+  const direct = parseMoney(token);
+  if (direct !== null) {
+    const repaired = repairSuspiciousStandardBankBalance(
+      negative ? -Math.abs(direct) : direct
+    );
+    return repaired;
+  }
+
+  return null;
+}
+
+/* =========================
+   FUNCTION: repairSuspiciousStandardBankBalance
+   PURPOSE:
+   Repair suspiciously large Standard Bank balances caused by OCR.
+   EXAMPLES:
+   - 1211382.94 -> 121382.94
+   - 1023261.42 -> 23261.42
+========================= */
+function repairSuspiciousStandardBankBalance(balance) {
   if (balance == null || !Number.isFinite(balance)) return null;
 
   const sign = balance < 0 ? -1 : 1;
@@ -441,15 +472,30 @@ function fixOcrBalance(balance) {
   const [whole, decimal] = asFixed.split(".");
 
   if (whole.length >= 7) {
-    const attempt = whole.slice(0, 2) + whole.slice(3);
-    const fixed = Number(`${attempt}.${decimal}`);
-
-    if (!Number.isNaN(fixed)) {
-      return sign * fixed;
+    const attemptA = whole.slice(0, 2) + whole.slice(3);
+    const parsedA = Number(`${attemptA}.${decimal}`);
+    if (!Number.isNaN(parsedA)) {
+      return sign * parsedA;
     }
   }
 
   return balance;
+}
+
+/* =========================
+   FUNCTION: buildCombinedBalanceCandidate
+   PURPOSE: Extract only the final balance token from the line.
+   CRITICAL:
+   - Prefers the final money-looking token
+   - Keeps raw structure so it can be repaired later
+========================= */
+function buildCombinedBalanceCandidate(line) {
+  const raw = normalizeWhitespace(line);
+
+  const matches = raw.match(/\d[\d\s,]*\.\d{2}-?/g);
+  if (!matches || matches.length === 0) return null;
+
+  return matches[matches.length - 1];
 }
 
 /* =========================
@@ -476,16 +522,15 @@ function extractStandardBankMoneyPair(line) {
   let balance = null;
 
   if (combinedBalanceCandidate) {
-    balance = cleanStandardBankMoneyToken(combinedBalanceCandidate);
+    balance = parseStandardBankBalanceToken(combinedBalanceCandidate);
   }
 
   if (balance === null) {
     const allMatches = raw.match(/\d[\d\s,]*\.\d{2}-?/g);
     if (!allMatches || allMatches.length < 2) return null;
 
-    let fallbackBalanceRaw = allMatches[allMatches.length - 1];
-    fallbackBalanceRaw = fallbackBalanceRaw.replace(/^\d{1,2}\s+/, "");
-    balance = cleanStandardBankMoneyToken(fallbackBalanceRaw);
+    const fallbackBalanceRaw = allMatches[allMatches.length - 1];
+    balance = parseStandardBankBalanceToken(fallbackBalanceRaw);
   }
 
   if (balance === null) return null;
@@ -495,8 +540,54 @@ function extractStandardBankMoneyPair(line) {
 
   return {
     amount,
-    balance: fixOcrBalance(balance),
+    balance,
   };
+}
+
+/* =========================
+   FUNCTION: extractStandardBankOpeningBalance
+   PURPOSE:
+   Extract and repair Standard Bank opening balance from text.
+========================= */
+function extractStandardBankOpeningBalance(text) {
+  const patterns = [
+    /BALANCE BROUGHT FORWARD\s+([0-9,\s.:-]+)/i,
+    /balance brought forward[:\s]+([0-9,\s.:-]+)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = String(text || "").match(pattern);
+    if (match) {
+      const value = parseStandardBankBalanceToken(match[1]);
+      if (value !== null) return value;
+    }
+  }
+
+  return null;
+}
+
+/* =========================
+   FUNCTION: extractStandardBankClosingBalance
+   PURPOSE:
+   Extract and repair Standard Bank closing balance from text.
+========================= */
+function extractStandardBankClosingBalance(text) {
+  const patterns = [
+    /Month-end BalanceR?([0-9,\s.:-]+)/i,
+    /closing balance[:\s]+([0-9,\s.:-]+)/i,
+    /final balance[:\s]+([0-9,\s.:-]+)/i,
+    /current balance[:\s]+([0-9,\s.:-]+)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = String(text || "").match(pattern);
+    if (match) {
+      const value = parseStandardBankBalanceToken(match[1]);
+      if (value !== null) return value;
+    }
+  }
+
+  return null;
 }
 
 /* =========================
@@ -668,7 +759,6 @@ function buildStandardBankDateCandidates(token) {
   const text = String(token);
   const candidates = [];
 
-  // Preferred: YYMMDD
   const yy1 = Number(text.slice(0, 2));
   const mm1 = Number(text.slice(2, 4));
   const dd1 = Number(text.slice(4, 6));
@@ -683,7 +773,6 @@ function buildStandardBankDateCandidates(token) {
     });
   }
 
-  // Fallback: DDMMYY
   const dd2 = Number(text.slice(0, 2));
   const mm2 = Number(text.slice(2, 4));
   const yy2 = Number(text.slice(4, 6));
@@ -705,10 +794,6 @@ function buildStandardBankDateCandidates(token) {
    FUNCTION: chooseBestStandardBankDateCandidate
    PURPOSE:
    Choose the best candidate date using the statement period.
-   RULES:
-   - Prefer dates inside the statement period
-   - Prefer YYMMDD over DDMMYY when tied
-   - If none fall inside, choose the closest to the period
 ========================= */
 function chooseBestStandardBankDateCandidate(candidates, statementPeriod = null) {
   if (!Array.isArray(candidates) || candidates.length === 0) return null;
@@ -757,11 +842,6 @@ function chooseBestStandardBankDateCandidate(candidates, statementPeriod = null)
    FUNCTION: extractStandardBankDate
    PURPOSE:
    Extract dd/mm/yyyy from Standard Bank reference text.
-   IMPROVEMENT:
-   - Handles ROL format
-   - Handles embedded 6-digit dates
-   - Prefers YYMMDD
-   - Uses statement period as context
 ========================= */
 function extractStandardBankDate(value, statementPeriod = null) {
   const text = normalizeWhitespace(value || "");
@@ -831,6 +911,27 @@ function shouldSkipStandardBankTransaction(tx) {
   if (Math.abs(tx.balance) > 100_000_000) return true;
 
   return false;
+}
+
+/* =========================
+   FUNCTION: deriveStandardBankOpeningBalanceFromFirstTransaction
+   PURPOSE:
+   Fallback opening balance for Standard Bank when OCR metadata is implausible.
+========================= */
+function deriveStandardBankOpeningBalanceFromFirstTransaction(transactions) {
+  if (!Array.isArray(transactions) || transactions.length === 0) return null;
+
+  const first = transactions[0];
+  if (
+    typeof first?.amount !== "number" ||
+    !Number.isFinite(first.amount) ||
+    typeof first?.balance !== "number" ||
+    !Number.isFinite(first.balance)
+  ) {
+    return null;
+  }
+
+  return Number((first.balance - first.amount).toFixed(2));
 }
 
 /* =========================
@@ -965,13 +1066,38 @@ export async function extractBankStatement(context) {
   const period = extractStatementPeriod(extractedText);
   const transactions = extractTransactionsBySubtype(extractedText, subtype, period);
 
-  const openingBalance = extractOpeningBalance(extractedText);
-
-  const closingBalance =
+  let openingBalance = extractOpeningBalance(extractedText);
+  let closingBalance =
     extractClosingBalance(extractedText) ??
     (transactions.length
       ? Number(transactions[transactions.length - 1].balance.toFixed(2))
       : null);
+
+  if (subtype === "standard_bank_statement") {
+    const sbOpeningBalance = extractStandardBankOpeningBalance(extractedText);
+    const sbClosingBalance = extractStandardBankClosingBalance(extractedText);
+
+    openingBalance = sbOpeningBalance ?? openingBalance;
+    closingBalance = sbClosingBalance ?? closingBalance;
+
+    if (
+      typeof openingBalance === "number" &&
+      Number.isFinite(openingBalance) &&
+      Math.abs(openingBalance) > 999999
+    ) {
+      const derivedOpening = deriveStandardBankOpeningBalanceFromFirstTransaction(transactions);
+      if (derivedOpening !== null) {
+        openingBalance = derivedOpening;
+      }
+    }
+
+    if (openingBalance == null) {
+      const derivedOpening = deriveStandardBankOpeningBalanceFromFirstTransaction(transactions);
+      if (derivedOpening !== null) {
+        openingBalance = derivedOpening;
+      }
+    }
+  }
 
   return {
     sourceFileName: file?.originalname || "unknown.pdf",
