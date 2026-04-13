@@ -4,34 +4,11 @@
  */
 
 import crypto from "crypto";
-import { classifyDocument } from "../classifier/classifyDocument";
-import { getParserByKey } from "../registry/parserRegistry";
-import { getActiveSchemaForDocumentType } from "../registry/schemaRegistry";
-import type { ClassificationResult } from "../types/classification";
-import type { ParseResult } from "../types/parseResult";
-import type { ParserContext, SchemaRegistryEntry } from "../types/parserPlugin";
+import { classifyDocument } from "../classifier/classifyDocument.js";
+import { getParserByKey } from "../registry/parserRegistry.js";
+import { getActiveSchemaForDocumentType } from "../registry/schemaRegistry.js";
 
-interface RunParseJobArgs {
-  file?: {
-    originalname?: string;
-    [key: string]: unknown;
-  };
-  extractedText?: string;
-}
-
-interface RunParseJobResponse {
-  jobId: string;
-  status: "completed" | "failed" | "unsupported";
-  classification: ClassificationResult;
-  schema: SchemaRegistryEntry | null;
-  result: ParseResult | null;
-  message: string;
-}
-
-export async function runParseJob({
-  file,
-  extractedText = "",
-}: RunParseJobArgs): Promise<RunParseJobResponse> {
+export async function runParseJob({ file, extractedText = "" }) {
   const jobId = crypto.randomUUID();
 
   const classification = await classifyDocument({
@@ -76,7 +53,7 @@ export async function runParseJob({
     };
   }
 
-  const context: ParserContext = {
+  const context = {
     jobId,
     file,
     extractedText,
