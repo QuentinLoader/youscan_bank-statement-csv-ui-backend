@@ -57,6 +57,9 @@ export function extractClientName(text) {
   const source = String(text || "");
 
   const patterns = [
+    // ABSA-specific: "Cheque account statement" followed by client name, then account number
+    /Cheque account statement\s+([A-Z][A-Z0-9\s&'.()/-]{5,120}?)\s+40-\d{4}-\d{4}/i,
+
     /account holder[:\s]+([A-Z][A-Z\s'.&/-]{3,120})/i,
     /customer name[:\s]+([A-Z][A-Z\s'.&/-]{3,120})/i,
     /\b(MR\.\s+[A-Z][A-Z\s'.&-]{2,80})\b/i,
@@ -69,7 +72,16 @@ export function extractClientName(text) {
   for (const pattern of patterns) {
     const match = source.match(pattern);
     if (match) {
-      return normalizeWhitespace(match[1]);
+      const candidate = normalizeWhitespace(match[1]);
+
+      if (
+        candidate &&
+        !/date\s*transaction\s*description/i.test(candidate) &&
+        !/charge\s*debit\s*amount\s*credit\s*amount\s*balance/i.test(candidate) &&
+        !/absa bank limited/i.test(candidate)
+      ) {
+        return candidate;
+      }
     }
   }
 
