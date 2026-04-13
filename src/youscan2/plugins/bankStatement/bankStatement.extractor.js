@@ -3,10 +3,16 @@
  * Bank statement extractor
  */
 
+function normalizeWhitespace(text) {
+  return String(text || "").replace(/\s+/g, " ").trim();
+}
+
 function extractAccountNumber(text) {
   const patterns = [
     /account number[:\s]+([0-9]{6,20})/i,
     /acc(?:ount)?\s*(?:no|number)?[:\s]+([0-9]{6,20})/i,
+    /cheque account[:\s]+([0-9]{6,20})/i,
+    /account[:\s]+([0-9]{6,20})/i,
   ];
 
   for (const pattern of patterns) {
@@ -19,34 +25,63 @@ function extractAccountNumber(text) {
 
 function extractClientName(text) {
   const patterns = [
-    /account holder[:\s]+([A-Z][A-Z\s'.-]{3,60})/i,
-    /customer name[:\s]+([A-Z][A-Z\s'.-]{3,60})/i,
-    /name[:\s]+([A-Z][A-Z\s'.-]{3,60})/i,
+    /account holder[:\s]+([A-Z][A-Z\s'.&-]{3,80})/i,
+    /customer name[:\s]+([A-Z][A-Z\s'.&-]{3,80})/i,
+    /name[:\s]+([A-Z][A-Z\s'.&-]{3,80})/i,
   ];
 
   for (const pattern of patterns) {
     const match = text.match(pattern);
-    if (match) return match[1].trim();
+    if (match) return normalizeWhitespace(match[1]);
   }
 
   return null;
 }
 
-function extractBalance(label, text) {
-  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const regex = new RegExp(`${escaped}[:\\s]+(-?[0-9,]+\\.?[0-9]{0,2})`, "i");
-  const match = text.match(regex);
+function parseMoney(value) {
+  if (!value) return null;
 
-  if (!match) return null;
+  const cleaned = String(value)
+    .replace(/\s+/g, "")
+    .replace(/,/g, "");
 
-  const value = Number(match[1].replace(/,/g, ""));
-  return Number.isNaN(value) ? null : value;
+  const number = Number(cleaned);
+  return Number.isNaN(number) ? null : number;
+}
+
+function extractBalanceByPatterns(text, patterns) {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const value = parseMoney(match[1]);
+      if (value !== null) return value;
+    }
+  }
+
+  return null;
+}
+
+function extractOpeningBalance(text) {
+  return extractBalanceByPatterns(text, [
+    /opening balance[:\s]+(-?[0-9,]+\.[0-9]{2})/i,
+    /balance brought forward[:\s]+(-?[0-9,]+\.[0-9]{2})/i,
+    /bal brought forward[:\s]+(-?[0-9,]+\.[0-9]{2})/i,
+  ]);
+}
+
+function extractClosingBalance(text) {
+  return extractBalanceByPatterns(text, [
+    /closing balance[:\s]+(-?[0-9,]+\.[0-9]{2})/i,
+    /final balance[:\s]+(-?[0-9,]+\.[0-9]{2})/i,
+    /current balance[:\s]+(-?[0-9,]+\.[0-9]{2})/i,
+  ]);
 }
 
 function extractStatementPeriod(text) {
   const patterns = [
     /statement period[:\s]+([0-9]{1,2}[\/-][0-9]{1,2}[\/-][0-9]{2,4})\s+(?:to|-)\s+([0-9]{1,2}[\/-][0-9]{1,2}[\/-][0-9]{2,4})/i,
     /period[:\s]+([0-9]{1,2}[\/-][0-9]{1,2}[\/-][0-9]{2,4})\s+(?:to|-)\s+([0-9]{1,2}[\/-][0-9]{1,2}[\/-][0-9]{2,4})/i,
+    /from[:\s]+([0-9]{1,2}[\/-][0-9]{1,2}[\/-][0-9]{2,4})\s+(?:to|-)\s+([0-9]{1,2}[\/-][0-9]{1,2}[\/-][0-9]{2,4})/i,
   ];
 
   for (const pattern of patterns) {
@@ -63,17 +98,6 @@ function extractStatementPeriod(text) {
     start: null,
     end: null,
   };
-}
-
-function parseMoney(value) {
-  if (!value) return null;
-
-  const cleaned = String(value)
-    .replace(/\s+/g, "")
-    .replace(/,/g, "");
-
-  const number = Number(cleaned);
-  return Number.isNaN(number) ? null : number;
 }
 
 function looksLikeTransactionLine(line) {
@@ -129,7 +153,7 @@ function extractTransactions(text) {
     const amountMatch = moneyMatches[moneyMatches.length - 2];
     const balanceMatch = moneyMatches[moneyMatches.length - 1];
 
-    const description = rest.slice(0, amountMatch.index).trim();
+    const description = normalizeWhitespace(rest.slice(0, amountMatch.index));
     if (!description) continue;
 
     let amount = parseMoney(amountMatch.value);
@@ -152,14 +176,12 @@ function extractTransactions(text) {
       descLower.includes("debit") ||
       descLower.includes("pmt");
 
-    // Initial sign guess
     if (isCredit) {
       amount = Math.abs(amount);
     } else if (isDebit) {
       amount = -Math.abs(amount);
     }
 
-    // Balance-driven correction
     if (transactions.length > 0) {
       const prev = transactions[transactions.length - 1];
 
@@ -204,6 +226,14 @@ export async function extractBankStatement(context) {
   const period = extractStatementPeriod(extractedText);
   const transactions = extractTransactions(extractedText);
 
+  const openingBalance =
+    extractOpeningBalance(extractedText) ??
+    (transactions.length ? transactions[0].balance - transactions[0].amount : null);
+
+  const closingBalance =
+    extractClosingBalance(extractedText) ??
+    (transactions.length ? transactions[transactions.length - 1].balance : null);
+
   return {
     sourceFileName: file?.originalname || "unknown.pdf",
     detectedSubtype: classification.documentSubtype,
@@ -216,8 +246,8 @@ export async function extractBankStatement(context) {
       clientName: extractClientName(extractedText),
       statementPeriodStart: period.start,
       statementPeriodEnd: period.end,
-      openingBalance: extractBalance("opening balance", extractedText),
-      closingBalance: extractBalance("closing balance", extractedText),
+      openingBalance,
+      closingBalance,
     },
     transactions,
   };
