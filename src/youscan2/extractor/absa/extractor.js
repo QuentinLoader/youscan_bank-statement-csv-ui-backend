@@ -1,6 +1,34 @@
 import { normalizeWhitespace } from "../shared/utils.js";
 import { parseMoney } from "../shared/money.js";
 
+function parseAbsaMoney(value) {
+  if (!value) return null;
+
+  let raw = String(value).trim();
+  let negative = false;
+
+  if (raw.endsWith("-")) {
+    negative = true;
+    raw = raw.slice(0, -1);
+  }
+
+  raw = raw.replace(/\s+/g, "");
+
+  const hasComma = raw.includes(",");
+  const hasDot = raw.includes(".");
+
+  if (hasComma && hasDot) {
+    raw = raw.replace(/,/g, "");
+  } else if (hasComma && !hasDot) {
+    raw = raw.replace(/\./g, "").replace(",", ".");
+  }
+
+  const num = Number(raw);
+  if (Number.isNaN(num)) return null;
+
+  return negative ? -Math.abs(num) : num;
+}
+
 function shouldSkipNoImpactRow(description, amount, currentBalance, previousBalance) {
   const lower = String(description).toLowerCase();
 
@@ -55,7 +83,7 @@ function applyBalanceDrivenCorrection(transactions) {
 }
 
 function looksLikeAbsaTransactionLine(line) {
-  return /^\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?/.test(line.trim());
+  return /^\d{1,2}[\/-]\d{1,2}[\/-]\d{4}/.test(line.trim());
 }
 
 export function extractAbsaTransactions(text) {
@@ -69,16 +97,24 @@ export function extractAbsaTransactions(text) {
   for (const line of lines) {
     if (!looksLikeAbsaTransactionLine(line)) continue;
 
-    const dateMatch = line.match(/^(\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?)/);
+    const dateMatch = line.match(/^(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/);
     if (!dateMatch) continue;
 
     const date = dateMatch[1];
     const rest = line.slice(date.length).trim();
 
-    const moneyMatches = [...rest.matchAll(/-?\d[\d,]*\.\d{2}/g)].map((m) => ({
-      value: m[0],
+    const moneyMatches = [...rest.matchAll(/-?\d[\d\s,.]*\d(?:[.,]\d{2})-?/g)].map((m) => ({
+      value: normalizeWhitespace(m[0]),
       index: m.index,
     }));
+
+    if (moneyMatches.length < 1) continue;
+
+    const descLowerRaw = normalizeWhitespace(rest).toLowerCase();
+
+    if (descLowerRaw.includes("bal brought forward")) {
+      continue;
+    }
 
     if (moneyMatches.length < 2) continue;
 
@@ -88,8 +124,8 @@ export function extractAbsaTransactions(text) {
     const description = normalizeWhitespace(rest.slice(0, amountMatch.index));
     if (!description) continue;
 
-    let amount = parseMoney(amountMatch.value);
-    const balance = parseMoney(balanceMatch.value);
+    let amount = parseAbsaMoney(amountMatch.value);
+    const balance = parseAbsaMoney(balanceMatch.value) ?? parseMoney(balanceMatch.value);
 
     if (amount === null || balance === null) continue;
 
