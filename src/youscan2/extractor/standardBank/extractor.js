@@ -124,19 +124,6 @@ function shouldSkipStandardBankTransaction(tx) {
   return false;
 }
 
-function isStandaloneFeeDescription(description) {
-  const upper = normalizeWhitespace(description).toUpperCase();
-
-  return (
-    upper === "EXCESS INTEREST" ||
-    upper === "SERVICE CHARGE" ||
-    upper === "OVERDRAFT SERVICE FEE NO-LIMIT" ||
-    upper === "FIXED MONTHLY FEE" ||
-    upper === "OVERDRAFT SERVICE FEE" ||
-    upper === "SERVICE CHARGE SBMOBILE"
-  );
-}
-
 function getStandardBankDescription(lines, i) {
   const prev = lines[i - 1];
   if (!prev) return "";
@@ -321,7 +308,7 @@ export function extractStandardBankTransactions(text, statementPeriod = null) {
       continue;
     }
 
-    let date =
+    const date =
       extractStandardBankDate(mergedDescription, statementPeriod) ||
       extractStandardBankDate(reference, statementPeriod) ||
       extractStandardBankDate(description, statementPeriod) ||
