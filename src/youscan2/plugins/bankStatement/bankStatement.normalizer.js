@@ -41,6 +41,42 @@ function isValidDateString(value) {
 }
 
 /* =========================
+   FUNCTION: extractStatementEndYear
+   PURPOSE: Pull yyyy from statementPeriodEnd for date resolution.
+========================= */
+function extractStatementEndYear(statementPeriodEnd) {
+  const text = String(statementPeriodEnd || "").trim();
+
+  let match = text.match(/(\d{4})$/);
+  if (match) return Number(match[1]);
+
+  match = text.match(/\b(\d{4})\b/);
+  if (match) return Number(match[1]);
+
+  return 2026;
+}
+
+/* =========================
+   FUNCTION: resolveYear
+   PURPOSE:
+   Resolve 2-digit years using statement context.
+   RULE:
+   - Prefer 2000-based year
+   - If it lands unreasonably ahead of statement end year, roll back by 10
+   NOTE:
+   - This matches your current Standard Bank cases like 251231 -> 2025
+========================= */
+function resolveYear(yy, statementEndYear) {
+  const candidate = 2000 + Number(yy);
+
+  if (candidate > statementEndYear) {
+    return candidate - 10;
+  }
+
+  return candidate;
+}
+
+/* =========================
    FUNCTION: extractDateFromDescription
    PURPOSE: Recover embedded Standard Bank dates from description text.
 ========================= */
@@ -57,6 +93,19 @@ function extractDateFromDescription(description, statementEndYear = 2026) {
   }
 
   match = text.match(/(\d{6})$/);
+  if (match) {
+    const token = match[1];
+    const dd = Number(token.slice(0, 2));
+    const mm = Number(token.slice(2, 4));
+    const yy = Number(token.slice(4, 6));
+
+    if (dd >= 1 && dd <= 31 && mm >= 1 && mm <= 12) {
+      const yyyy = resolveYear(yy, statementEndYear);
+      return `${token.slice(0, 2)}/${token.slice(2, 4)}/${yyyy}`;
+    }
+  }
+
+  match = text.match(/\b(\d{6})\b/);
   if (match) {
     const token = match[1];
     const dd = Number(token.slice(0, 2));
@@ -96,7 +145,7 @@ function shouldRemoveTransaction(description) {
    FUNCTION: normalizeTransaction
    PURPOSE: Apply transaction-level cleanup rules.
 ========================= */
-function normalizeTransaction(tx) {
+function normalizeTransaction(tx, statementEndYear) {
   const description = tx?.description || "";
   const upper = String(description).toUpperCase();
 
@@ -108,7 +157,7 @@ function normalizeTransaction(tx) {
   };
 
   if (!isValidDateString(normalized.date)) {
-    normalized.date = extractDateFromDescription(description);
+    normalized.date = extractDateFromDescription(description, statementEndYear);
   }
 
   if (
@@ -127,7 +176,7 @@ function normalizeTransaction(tx) {
    FUNCTION: normalizeTransactions
    PURPOSE: Normalize and filter transaction array.
 ========================= */
-function normalizeTransactions(transactions, subtype) {
+function normalizeTransactions(transactions, subtype, statementEndYear) {
   const list = Array.isArray(transactions) ? transactions : [];
   const isStandardBank =
     String(subtype || "").toLowerCase().includes("standard_bank") ||
@@ -142,7 +191,7 @@ function normalizeTransactions(transactions, subtype) {
       continue;
     }
 
-    normalized.push(normalizeTransaction(tx));
+    normalized.push(normalizeTransaction(tx, statementEndYear));
   }
 
   return normalized;
@@ -155,9 +204,12 @@ function normalizeTransactions(transactions, subtype) {
 export async function normalizeBankStatement(raw) {
   const metadata = raw?.metadata || {};
   const subtype = raw?.detectedSubtype || metadata.bankName || "";
-  const bankName = metadata.bankName && metadata.bankName !== "unknown"
-    ? mapSubtypeToBankName(metadata.bankName)
-    : mapSubtypeToBankName(subtype);
+  const bankName =
+    metadata.bankName && metadata.bankName !== "unknown"
+      ? mapSubtypeToBankName(metadata.bankName)
+      : mapSubtypeToBankName(subtype);
+
+  const statementEndYear = extractStatementEndYear(metadata.statementPeriodEnd);
 
   return {
     bankName,
@@ -167,7 +219,7 @@ export async function normalizeBankStatement(raw) {
     statementPeriodEnd: metadata.statementPeriodEnd || null,
     openingBalance: metadata.openingBalance ?? null,
     closingBalance: metadata.closingBalance ?? null,
-    transactions: normalizeTransactions(raw?.transactions, subtype),
+    transactions: normalizeTransactions(raw?.transactions, subtype, statementEndYear),
     sourceFileName: raw?.sourceFileName || null,
   };
 }
