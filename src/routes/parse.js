@@ -8,6 +8,7 @@ import pool from "../config/db.js";
 import { parseStatement } from "../services/parseStatement.js";
 import { authenticateUser } from "../middleware/auth.middleware.js";
 import { checkPlanAccess } from "../middleware/credits.middleware.js";
+import { runParseJob } from "../youscan2/orchestrator/runParseJob.js";
 
 export const router = express.Router();
 
@@ -160,6 +161,37 @@ router.post(
     } catch (error) {
       console.error("PARSE ROUTE ERROR:", error);
       return res.status(500).json({ error: "PARSE_ROUTE_FAILED" });
+    }
+  }
+);
+router.post(
+  "/test-youscan2",
+  upload.any(),
+  async (req, res) => {
+    try {
+      const files = req.files || [];
+
+      if (files.length === 0) {
+        return res.status(400).json({ error: "NO_FILE_UPLOADED" });
+      }
+
+      const file = files[0];
+
+      const extractedText = file.buffer.toString("utf8");
+
+      const result = await runParseJob({
+        file: {
+          originalname: file.originalname,
+        },
+        extractedText,
+      });
+
+      return res.status(200).json(result);
+    } catch (error) {
+      console.error("YOUSCAN 2.0 TEST ROUTE ERROR:", error);
+      return res.status(500).json({
+        error: "YOUSCAN2_TEST_ROUTE_FAILED",
+      });
     }
   }
 );
