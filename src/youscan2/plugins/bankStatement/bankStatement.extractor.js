@@ -272,15 +272,23 @@ function cleanStandardBankMoneyToken(value) {
 function extractStandardBankMoneyPair(line) {
   const raw = String(line || "");
 
-  const matches = raw.match(/\d[\d\s,]*\.\d{2}-?/g);
+  const cleaned = raw
+    .replace(/(\d{2,})\s+(\d{3},)/g, "$1$2")
+    .replace(/\s+/g, " ");
+
+  const matches = cleaned.match(/\d[\d,]*\.\d{2}-?/g);
   if (!matches || matches.length < 2) return null;
 
-  const amount = cleanStandardBankMoneyToken(matches[0]);
-  const balance = cleanStandardBankMoneyToken(matches[1]);
+  const amountRaw = matches[0];
+  const balanceRaw = matches[1];
+
+  const amount = cleanStandardBankMoneyToken(amountRaw);
+  const balance = cleanStandardBankMoneyToken(balanceRaw);
 
   if (amount === null || balance === null) return null;
 
   if (Math.abs(amount) > 1_000_000) return null;
+  if (Math.abs(balance) > 10_000_000) return null;
 
   return { amount, balance };
 }
