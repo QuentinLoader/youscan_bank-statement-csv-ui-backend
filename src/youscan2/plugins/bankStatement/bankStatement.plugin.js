@@ -3,31 +3,12 @@
  * Bank Statement Plugin
  */
 
-import { DOCUMENT_TYPES } from "../../registry/documentTypes";
-import type { ParseResult } from "../../types/parseResult";
-import type { ParserPlugin } from "../../types/parserPlugin";
-import type { ValidationResult } from "../../types/validation";
+import { DOCUMENT_TYPES } from "../../registry/documentTypes.js";
+import { extractBankStatement } from "./bankStatement.extractor.js";
+import { normalizeBankStatement } from "./bankStatement.normalizer.js";
+import { validateBankStatement } from "./bankStatement.validator.js";
 
-export interface BankStatementTransaction {
-  date: string;
-  description: string;
-  amount: number;
-  balance: number | null;
-}
-
-export interface BankStatementData {
-  bankName: string;
-  accountNumber: string | null;
-  clientName: string | null;
-  statementPeriodStart: string | null;
-  statementPeriodEnd: string | null;
-  openingBalance: number | null;
-  closingBalance: number | null;
-  transactions: BankStatementTransaction[];
-  sourceFileName: string | null;
-}
-
-export const bankStatementPlugin: ParserPlugin<BankStatementData> = {
+export const bankStatementPlugin = {
   key: "bank_statement.generic.v2",
   documentType: DOCUMENT_TYPES.BANK_STATEMENT,
 
@@ -36,51 +17,18 @@ export const bankStatementPlugin: ParserPlugin<BankStatementData> = {
   },
 
   async extract(context) {
-    const { file, classification } = context;
-
-    return {
-      sourceFileName: file?.originalname || "unknown.pdf",
-      detectedSubtype: classification.documentSubtype,
-      rawTextPreview: context.textPreview || "",
-      transactions: [],
-      metadata: {},
-    };
+    return extractBankStatement(context);
   },
 
-  async normalize(raw): Promise<BankStatementData> {
-    const typedRaw = raw as {
-      sourceFileName?: string;
-      transactions?: BankStatementTransaction[];
-    };
-
-    return {
-      bankName: "unknown",
-      accountNumber: null,
-      clientName: null,
-      statementPeriodStart: null,
-      statementPeriodEnd: null,
-      openingBalance: null,
-      closingBalance: null,
-      transactions: typedRaw.transactions || [],
-      sourceFileName: typedRaw.sourceFileName || null,
-    };
+  async normalize(raw, context) {
+    return normalizeBankStatement(raw, context);
   },
 
-  async validate(): Promise<ValidationResult> {
-    return {
-      valid: true,
-      status: "passed",
-      issues: [],
-      score: 1,
-    };
+  async validate(normalized, context) {
+    return validateBankStatement(normalized, context);
   },
 
-  async toFinalResult({
-    jobId,
-    classification,
-    normalized,
-    validation,
-  }): Promise<ParseResult<BankStatementData>> {
+  async toFinalResult({ jobId, classification, normalized, validation }) {
     return {
       jobId,
       documentType: classification.documentType,
