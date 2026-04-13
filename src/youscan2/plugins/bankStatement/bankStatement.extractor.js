@@ -54,7 +54,7 @@ function extractBalanceByPatterns(text, patterns) {
     const match = text.match(pattern);
     if (match) {
       const value = parseMoney(match[1]);
-      if (value !== null) return value;
+      if (value !== null) return Number(value.toFixed(2));
     }
   }
 
@@ -206,8 +206,8 @@ function extractTransactions(text) {
     transactions.push({
       date,
       description,
-      amount,
-      balance,
+      amount: Number(amount.toFixed(2)),
+      balance: Number(balance.toFixed(2)),
     });
   }
 
@@ -226,13 +226,13 @@ export async function extractBankStatement(context) {
   const period = extractStatementPeriod(extractedText);
   const transactions = extractTransactions(extractedText);
 
-  const openingBalance =
-    extractOpeningBalance(extractedText) ??
-    (transactions.length ? transactions[0].balance - transactions[0].amount : null);
+  const openingBalance = extractOpeningBalance(extractedText);
 
   const closingBalance =
     extractClosingBalance(extractedText) ??
-    (transactions.length ? transactions[transactions.length - 1].balance : null);
+    (transactions.length
+      ? Number(transactions[transactions.length - 1].balance.toFixed(2))
+      : null);
 
   return {
     sourceFileName: file?.originalname || "unknown.pdf",
