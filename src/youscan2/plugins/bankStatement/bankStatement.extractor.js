@@ -406,18 +406,21 @@ function cleanStandardBankMoneyToken(value) {
 
 /* =========================
    FUNCTION: buildCombinedBalanceCandidate
-   PURPOSE: Extract only the final balance token from the end of the line.
+   PURPOSE: Extract only the final balance token from the line.
    CRITICAL:
-   - Ignores prefix/day column like "01" or "12"
-   - Returns only the final money token
+   - Prefers the final money-looking token
+   - Removes leading day-column prefix like "12 " or "01 "
 ========================= */
 function buildCombinedBalanceCandidate(line) {
   const raw = normalizeWhitespace(line);
-  const matches = raw.match(/\d{1,4},\d{3}\.\d{2}-?/g);
 
+  const matches = raw.match(/\d[\d\s,]*\.\d{2}-?/g);
   if (!matches || matches.length === 0) return null;
 
-  return matches[matches.length - 1];
+  let candidate = matches[matches.length - 1];
+  candidate = candidate.replace(/^\d{1,2}\s+/, "");
+
+  return candidate;
 }
 
 /* =========================
@@ -480,7 +483,8 @@ function extractStandardBankMoneyPair(line) {
     const allMatches = raw.match(/\d[\d\s,]*\.\d{2}-?/g);
     if (!allMatches || allMatches.length < 2) return null;
 
-    const fallbackBalanceRaw = allMatches[allMatches.length - 1];
+    let fallbackBalanceRaw = allMatches[allMatches.length - 1];
+    fallbackBalanceRaw = fallbackBalanceRaw.replace(/^\d{1,2}\s+/, "");
     balance = cleanStandardBankMoneyToken(fallbackBalanceRaw);
   }
 
@@ -662,7 +666,6 @@ function buildStandardBankDateCandidates(token) {
   if (!/^\d{6}$/.test(String(token || ""))) return [];
 
   const text = String(token);
-
   const candidates = [];
 
   // Preferred: YYMMDD
@@ -728,8 +731,6 @@ function chooseBestStandardBankDateCandidate(candidates, statementPeriod = null)
         const distanceToStart = Math.abs(candidateMs - startMs);
         const distanceToEnd = Math.abs(candidateMs - endMs);
         const nearestDistance = Math.min(distanceToStart, distanceToEnd);
-
-        // Lower penalty for closer dates
         score -= nearestDistance / 86400000;
       }
     }
@@ -834,10 +835,10 @@ function shouldSkipStandardBankTransaction(tx) {
 
 /* =========================
    FUNCTION: extractStandardBankTransactions
-   PURPOSE: Extract Standard Bank transactions using 3-line block logic:
+   PURPOSE: Extract Standard Bank transactions using tightened block logic:
    - previous line = description
    - current line  = amount + balance
-   - next line     = reference/detail
+   - next line     = reference/detail only if it looks like a true reference
 ========================= */
 function extractStandardBankTransactions(text, statementPeriod = null) {
   const lines = String(text)
@@ -848,36 +849,30 @@ function extractStandardBankTransactions(text, statementPeriod = null) {
   const transactions = [];
 
   for (let i = 0; i < lines.length; i++) {
-    const moneyPair = extractStandardBankMoneyPair(lines[i]);
+    const line = lines[i];
+    const moneyPair = extractStandardBankMoneyPair(line);
     if (!moneyPair) continue;
 
     let description = "";
     let reference = "";
 
-    if (i > 0) {
-      const prev = lines[i - 1];
-
-      if (
-        prev &&
-        !isStandardBankMarkerLine(prev) &&
-        !isStandardBankHeaderOrNoise(prev) &&
-        !extractStandardBankMoneyPair(prev)
-      ) {
-        description = prev;
-      }
+    const prev = lines[i - 1];
+    if (
+      prev &&
+      !isStandardBankMarkerLine(prev) &&
+      !isStandardBankHeaderOrNoise(prev) &&
+      !extractStandardBankMoneyPair(prev)
+    ) {
+      description = prev;
     }
 
-    if (i + 1 < lines.length) {
-      const next = lines[i + 1];
-
-      if (
-        next &&
-        !isStandardBankMarkerLine(next) &&
-        !isStandardBankHeaderOrNoise(next) &&
-        !extractStandardBankMoneyPair(next)
-      ) {
-        reference = next;
-      }
+    const next = lines[i + 1];
+    if (
+      next &&
+      isStandardBankReferenceLine(next) &&
+      !extractStandardBankMoneyPair(next)
+    ) {
+      reference = next;
     }
 
     if (shouldSkipStandardBankBlock(description, reference)) {
@@ -888,20 +883,21 @@ function extractStandardBankTransactions(text, statementPeriod = null) {
       reference ? `${description} ${reference}` : description
     );
 
-    const upperDescription = mergedDescription.toUpperCase();
+    const upper = mergedDescription.toUpperCase();
 
-    // Remove RTD mirror / reversal rows
-    if (upperDescription.includes("RTD-NOT PROVIDED FOR")) {
-      continue;
-    }
+    if (upper.includes("RTD-NOT PROVIDED FOR")) continue;
 
-    // Remove footer / summary / legal noise
     if (
-      upperDescription.includes("VAT SUMMARY") ||
-      upperDescription.includes("ACCOUNT SUMMARY") ||
-      upperDescription.includes("DETAILS OF AGREEMENT") ||
-      upperDescription.includes("THIS DOCUMENT CONSTITUTES A CREDIT NOTE") ||
-      upperDescription.includes("TOTAL VAT")
+      upper.includes("VAT SUMMARY") ||
+      upper.includes("ACCOUNT SUMMARY") ||
+      upper.includes("DETAILS OF AGREEMENT") ||
+      upper.includes("THIS DOCUMENT CONSTITUTES A CREDIT NOTE") ||
+      upper.includes("TOTAL VAT") ||
+      upper.includes("FEE-UNPAID ITEM") ||
+      upper.includes("UNPAID FEE") ||
+      upper.includes("SERVICE CHARGE") ||
+      upper.includes("OVERDRAFT SERVICE FEE") ||
+      upper.includes("FIXED MONTHLY FEE")
     ) {
       continue;
     }
@@ -919,9 +915,7 @@ function extractStandardBankTransactions(text, statementPeriod = null) {
       balance: Number(moneyPair.balance.toFixed(2)),
     };
 
-    if (shouldSkipStandardBankTransaction(tx)) {
-      continue;
-    }
+    if (shouldSkipStandardBankTransaction(tx)) continue;
 
     transactions.push(tx);
   }
