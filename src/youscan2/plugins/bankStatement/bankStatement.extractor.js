@@ -97,7 +97,6 @@ function extractTransactions(text) {
     const date = dateMatch[1];
     const rest = line.slice(date.length).trim();
 
-    // Capture money-like values, assuming amount + balance near the end
     const moneyMatches = [...rest.matchAll(/-?\d[\d,]*\.\d{2}/g)].map(m => ({
       value: m[0],
       index: m.index,
@@ -109,37 +108,39 @@ function extractTransactions(text) {
     const balanceMatch = moneyMatches[moneyMatches.length - 1];
 
     const description = rest.slice(0, amountMatch.index).trim();
+    if (!description) continue;
+
     let amount = parseMoney(amountMatch.value);
-
-// Determine sign from description
-const descLower = description.toLowerCase();
-
-const isDebit =
-  descLower.includes("fee") ||
-  descLower.includes("charge") ||
-  descLower.includes("pmt") ||
-  descLower.includes("payment") ||
-  descLower.includes("withdrawal");
-
-const isCredit =
-  descLower.includes("credit") ||
-  descLower.includes("deposit");
-
-if (isDebit && amount > 0) {
-  amount = -Math.abs(amount);
-}
-
-if (isCredit && amount < 0) {
-  amount = Math.abs(amount);
-}
-
-// Ignore clearly invalid zero rows
-if (amount === 0) {
-  continue;
-}
     const balance = parseMoney(balanceMatch.value);
 
-    if (!description || amount === null) continue;
+    if (amount === null) continue;
+
+    const descLower = description.toLowerCase();
+
+    const isCredit =
+      descLower.includes(" cr") ||
+      descLower.includes("credit") ||
+      descLower.includes("deposit") ||
+      descLower.includes("acb credit");
+
+    const isDebit =
+      descLower.includes(" fee") ||
+      descLower.includes("charge") ||
+      descLower.includes("withdrawal") ||
+      descLower.includes("debit") ||
+      descLower.includes("pmt");
+
+    // Credit overrides debit-style keywords
+    if (isCredit) {
+      amount = Math.abs(amount);
+    } else if (isDebit) {
+      amount = -Math.abs(amount);
+    }
+
+    // Ignore clearly invalid zero rows
+    if (amount === 0) {
+      continue;
+    }
 
     transactions.push({
       date,
@@ -158,7 +159,7 @@ export async function extractBankStatement(context) {
     classification,
     extractedText = "",
     textPreview = "",
-    extractionMeta = null
+    extractionMeta = null,
   } = context;
 
   const period = extractStatementPeriod(extractedText);
