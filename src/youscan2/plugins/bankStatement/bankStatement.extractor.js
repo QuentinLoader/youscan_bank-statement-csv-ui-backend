@@ -478,7 +478,10 @@ function extractStandardBankMoneyPair(line) {
   if (Math.abs(amount) > 1_000_000) return null;
   if (Math.abs(balance) > 100_000_000) return null;
 
-  return { amount, balance };
+  return {
+  amount,
+  balance: fixOcrBalance(balance)
+};
 }
 
 /* =========================
