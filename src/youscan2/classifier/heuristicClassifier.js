@@ -9,17 +9,41 @@ export function heuristicClassifier(text = "") {
   const lower = String(text).toLowerCase();
 
   const hasAbsa = lower.includes("absa");
-  const hasFnb = lower.includes("fnb");
+  const hasFnb = lower.includes("fnb") || lower.includes("first national bank");
   const hasNedbank = lower.includes("nedbank");
   const hasCapitec = lower.includes("capitec");
   const hasDiscovery = lower.includes("discovery");
+  const hasStandardBank =
+    lower.includes("standard bank") ||
+    lower.includes("stanbic") ||
+    lower.includes("blue wallet") ||
+    lower.includes("mymo");
 
-  const hasOpeningBalance = lower.includes("opening balance");
-  const hasClosingBalance = lower.includes("closing balance");
-  const hasTransactionDate = lower.includes("transaction date");
-  const hasDebit = lower.includes("debit");
-  const hasCredit = lower.includes("credit");
-  const hasBalance = lower.includes("balance");
+  const hasOpeningBalance =
+    lower.includes("opening balance") ||
+    lower.includes("balance brought forward") ||
+    lower.includes("bal brought forward");
+
+  const hasClosingBalance =
+    lower.includes("closing balance") ||
+    lower.includes("final balance") ||
+    lower.includes("current balance");
+
+  const hasTransactionDate =
+    lower.includes("transaction date") ||
+    lower.includes("date description") ||
+    lower.includes("date details");
+
+  const hasDebit =
+    lower.includes("debit") ||
+    lower.includes("debits");
+
+  const hasCredit =
+    lower.includes("credit") ||
+    lower.includes("credits");
+
+  const hasBalance =
+    lower.includes("balance");
 
   const bankSignalCount = [
     hasOpeningBalance,
@@ -30,7 +54,6 @@ export function heuristicClassifier(text = "") {
     hasBalance,
   ].filter(Boolean).length;
 
-  // Strong bank-statement detection first
   if (hasAbsa && bankSignalCount >= 2) {
     return {
       documentType: DOCUMENT_TYPES.BANK_STATEMENT,
@@ -86,7 +109,17 @@ export function heuristicClassifier(text = "") {
     };
   }
 
-  // Generic bank statement fallback
+  if (hasStandardBank && bankSignalCount >= 2) {
+    return {
+      documentType: DOCUMENT_TYPES.BANK_STATEMENT,
+      documentSubtype: DOCUMENT_SUBTYPES.STANDARD_BANK_STATEMENT,
+      confidence: 0.98,
+      supported: true,
+      reasons: ["Found Standard Bank branding", "Found multiple bank statement signals"],
+      suggestedPipeline: "bank_statement_v2",
+    };
+  }
+
   if (bankSignalCount >= 3) {
     return {
       documentType: DOCUMENT_TYPES.BANK_STATEMENT,
@@ -98,7 +131,6 @@ export function heuristicClassifier(text = "") {
     };
   }
 
-  // Invoice only after bank checks
   if (
     lower.includes("invoice") ||
     lower.includes("tax invoice") ||

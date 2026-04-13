@@ -18,6 +18,7 @@ export const DOCUMENT_SUBTYPES = {
   NEDBANK_STATEMENT: "nedbank_statement",
   CAPITEC_STATEMENT: "capitec_statement",
   DISCOVERY_STATEMENT: "discovery_statement",
+  STANDARD_BANK_STATEMENT: "standard_bank_statement",
 
   GENERIC_INVOICE: "generic_invoice",
   GENERIC_DELIVERY_NOTE: "generic_delivery_note",
