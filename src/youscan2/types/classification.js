@@ -1,34 +1,30 @@
 /**
- * YouScan 2.0
- * Classification result types
+ * YouScan V2
+ * JSDoc-only classification contracts.
+ *
+ * The repository is JavaScript/ESM. These definitions intentionally contain
+ * no TypeScript syntax so Node can parse every .js file in src/youscan2.
  */
 
-export type DocumentType =
-  | "bank_statement"
-  | "invoice"
-  | "delivery_note"
-  | "proof_of_delivery"
-  | "waybill"
-  | "unknown";
+/**
+ * @typedef {"bank_statement"|"invoice"|"delivery_note"|"proof_of_delivery"|"waybill"|"unknown"} DocumentType
+ */
 
-export type DocumentSubtype =
-  | "absa_statement"
-  | "fnb_statement"
-  | "nedbank_statement"
-  | "capitec_statement"
-  | "discovery_statement"
-  | "generic_invoice"
-  | "generic_delivery_note"
-  | "generic_pod"
-  | "generic_waybill"
-  | "unknown";
+/**
+ * @typedef {"absa_statement"|"fnb_statement"|"nedbank_statement"|"capitec_statement"|"discovery_statement"|"standard_bank_statement"|"generic_invoice"|"generic_delivery_note"|"generic_pod"|"generic_waybill"|"unknown"} DocumentSubtype
+ */
 
-export interface ClassificationResult {
-  documentType: DocumentType;
-  documentSubtype: DocumentSubtype;
-  confidence: number;
-  supported: boolean;
-  reasons: string[];
-  suggestedPipeline?: string | null;
-  fileName?: string;
-}
+/**
+ * @typedef {Object} ClassificationResult
+ * @property {DocumentType} documentType
+ * @property {DocumentSubtype} documentSubtype
+ * @property {number} confidence
+ * @property {boolean} supported
+ * @property {string[]} reasons
+ * @property {string|null} [suggestedPipeline]
+ * @property {string} [fileName]
+ * @property {"heuristic"|"ai"|"hybrid"} [classificationMethod]
+ * @property {boolean} [aiAttempted]
+ */
+
+export {};

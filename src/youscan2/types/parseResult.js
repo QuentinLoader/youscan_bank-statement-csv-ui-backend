@@ -1,44 +1,24 @@
 /**
- * YouScan 2.0
- * Unified parse result envelope
+ * YouScan V2
+ * JSDoc-only unified parse-result contracts.
  */
 
-import type {
-  ClassificationResult,
-  DocumentType,
-  DocumentSubtype,
-} from "./classification";
-import type { ValidationIssue, ValidationStatus } from "./validation";
+/** @typedef {"completed"|"failed"|"needs_review"|"unsupported"} ParseJobStatus */
 
-export type ParseJobStatus =
-  | "completed"
-  | "failed"
-  | "needs_review"
-  | "unsupported";
+/**
+ * @template TData
+ * @typedef {Object} ParseResult
+ * @property {string} jobId
+ * @property {string} documentType
+ * @property {string} documentSubtype
+ * @property {string} parserKey
+ * @property {string} parserVersion
+ * @property {string} schemaKey
+ * @property {number} confidence
+ * @property {string} validationStatus
+ * @property {Array<Object>} issues
+ * @property {TData} data
+ * @property {ParseJobStatus} status
+ */
 
-export interface ParseResult<TData = unknown> {
-  jobId: string;
-  documentType: DocumentType;
-  documentSubtype: DocumentSubtype;
-  parserKey: string;
-  parserVersion: string;
-  schemaKey: string;
-  confidence: number;
-  validationStatus: ValidationStatus;
-  issues: ValidationIssue[];
-  data: TData;
-  status: ParseJobStatus;
-}
-
-export interface FinalizeParseResultArgs<TData = unknown> {
-  jobId: string;
-  classification: ClassificationResult;
-  parserKey: string;
-  parserVersion: string;
-  schemaKey: string;
-  validationStatus: ValidationStatus;
-  issues: ValidationIssue[];
-  data: TData;
-  status: ParseJobStatus;
-  confidence?: number;
-}
+export {};

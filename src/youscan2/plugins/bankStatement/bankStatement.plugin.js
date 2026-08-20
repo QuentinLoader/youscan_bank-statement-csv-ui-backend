@@ -1,12 +1,25 @@
 /**
- * YouScan 2.0
+ * YouScan V2
  * Bank Statement Plugin
  */
 
 import { DOCUMENT_TYPES } from "../../registry/documentTypes.js";
+import { PARSE_JOB_STATUSES, VALIDATION_STATUSES } from "../../schemas/common.js";
 import { extractBankStatement } from "./bankStatement.extractor.js";
 import { normalizeBankStatement } from "./bankStatement.normalizer.js";
 import { validateBankStatement } from "./bankStatement.validator.js";
+
+function mapValidationToParseStatus(validation) {
+  if (validation?.status === VALIDATION_STATUSES.PASSED) {
+    return PARSE_JOB_STATUSES.COMPLETED;
+  }
+
+  if (validation?.status === VALIDATION_STATUSES.PASSED_WITH_WARNINGS) {
+    return PARSE_JOB_STATUSES.NEEDS_REVIEW;
+  }
+
+  return PARSE_JOB_STATUSES.FAILED;
+}
 
 export const bankStatementPlugin = {
   key: "bank_statement.generic.v2",
@@ -38,9 +51,10 @@ export const bankStatementPlugin = {
       schemaKey: "bank_statement.v1",
       confidence: classification.confidence,
       validationStatus: validation.status,
+      validationScore: validation.score,
       issues: validation.issues,
       data: normalized,
-      status: validation.valid ? "completed" : "failed",
+      status: mapValidationToParseStatus(validation),
     };
   },
 };

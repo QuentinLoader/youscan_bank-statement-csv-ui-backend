@@ -1,9 +1,11 @@
 import { normalizeWhitespace } from "../shared/utils.js";
 
 const DATE_AT_START_RE = /^\s*(\d{1,2}\/\d{1,2}\/\d{4})/;
+const TRANSACTION_DATE_RE = /^\s*\d{1,2}\/\d{1,2}\/\d{4}/m;
 
-// safer money token
-const MONEY_TOKEN_RE = /(\d{1,3}(?:[ ,]\d{3})*[.,]\d{2}-?)/g;
+// Supports common SA statement formats such as 1,234.56, 1 234,56,
+// 1234.56 and trailing-minus values such as 123.45-.
+const MONEY_TOKEN_RE = /(?<![A-Za-z0-9])-?(?:\d{1,3}(?:[ ,]\d{3})+|\d+)[.,]\d{2}-?(?![A-Za-z0-9])/g;
 
 const NOISE_PATTERNS = [
   /authorised financial services provider/i,
@@ -27,6 +29,9 @@ const NOISE_PATTERNS = [
   /statement no:/i,
   /client vat reg no:/i,
   /overdraft limit/i,
+  /^closing balance\b/i,
+  /^final balance\b/i,
+  /^current balance\b/i,
 ];
 
 const DROP_DESCRIPTION_PATTERNS = [
@@ -35,25 +40,40 @@ const DROP_DESCRIPTION_PATTERNS = [
   /^notific fee sms/i,
 ];
 
-// stop parsing before footer
+function findFirstTransactionIndex(text) {
+  const match = TRANSACTION_DATE_RE.exec(String(text || ""));
+  return match?.index ?? -1;
+}
+
+// Footer markers are only honoured after the first transaction row. This is
+// important for ABSA because "Cheque account statement" also appears in the
+// normal statement header and must never truncate the document at the top.
 function truncateAtStatementEnd(text) {
+  const source = String(text || "");
+  const firstTransactionIndex = findFirstTransactionIndex(source);
+
+  if (firstTransactionIndex === -1) return source;
+
   const stopPatterns = [
     /SERVICE FEE:/i,
     /CREDIT\s+INTEREST\s+RATE/i,
     /ABSA BUSINESS BANKING WILL BE UPDATING/i,
     /Cheque account statement/i,
+    /Our Privacy Notice/i,
   ];
 
-  let cutIndex = text.length;
+  const tail = source.slice(firstTransactionIndex);
+  let cutIndex = source.length;
 
   for (const pattern of stopPatterns) {
-    const idx = text.search(pattern);
-    if (idx !== -1 && idx < cutIndex) {
-      cutIndex = idx;
+    const idx = tail.search(pattern);
+    if (idx !== -1) {
+      const absoluteIndex = firstTransactionIndex + idx;
+      if (absoluteIndex < cutIndex) cutIndex = absoluteIndex;
     }
   }
 
-  return text.slice(0, cutIndex);
+  return source.slice(0, cutIndex);
 }
 
 function isNoiseLine(line) {
@@ -68,38 +88,54 @@ function cleanAbsaText(text) {
     .replace(/\r/g, "\n");
 }
 
-// normalize money
 function normalizeMoneyToken(raw) {
   if (!raw) return null;
 
-  let s = raw.trim();
-
+  let value = String(raw).trim();
   let negative = false;
-  if (s.endsWith("-")) {
+
+  if (value.startsWith("-")) {
     negative = true;
-    s = s.slice(0, -1);
+    value = value.slice(1);
   }
 
-  s = s.replace(/\s+/g, "");
-
-  if (s.includes(",") && !s.includes(".")) {
-    s = s.replace(",", ".");
+  if (value.endsWith("-")) {
+    negative = true;
+    value = value.slice(0, -1);
   }
 
-  const value = parseFloat(s);
-  if (!Number.isFinite(value)) return null;
+  value = value.replace(/\s+/g, "");
 
-  return negative ? -value : value;
+  const lastComma = value.lastIndexOf(",");
+  const lastDot = value.lastIndexOf(".");
+
+  if (lastComma !== -1 && lastDot !== -1) {
+    if (lastDot > lastComma) {
+      // 1,234.56
+      value = value.replace(/,/g, "");
+    } else {
+      // 1.234,56
+      value = value.replace(/\./g, "").replace(",", ".");
+    }
+  } else if (lastComma !== -1) {
+    // 1 234,56 or 1234,56
+    value = value.replace(/,/g, ".");
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+
+  return negative ? -Math.abs(parsed) : parsed;
 }
 
 function extractMoneyTokens(text) {
   return [...String(text || "").matchAll(MONEY_TOKEN_RE)]
-    .map((m) => ({
-      raw: m[0],
-      value: normalizeMoneyToken(m[0]),
-      index: m.index ?? -1,
+    .map((match) => ({
+      raw: match[0],
+      value: normalizeMoneyToken(match[0]),
+      index: match.index ?? -1,
     }))
-    .filter((x) => Number.isFinite(x.value));
+    .filter((item) => Number.isFinite(item.value));
 }
 
 function splitIntoTransactionBlocks(lines) {
@@ -122,6 +158,10 @@ function splitIntoTransactionBlocks(lines) {
   return blocks;
 }
 
+function isFiniteMoney(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 function parseAbsaBlock(block, previousBalance = null) {
   const firstLine = block[0] || "";
   const dateMatch = firstLine.match(DATE_AT_START_RE);
@@ -134,27 +174,29 @@ function parseAbsaBlock(block, previousBalance = null) {
   if (!money.length) return null;
 
   const balance = money[money.length - 1].value;
+  if (!isFiniteMoney(balance)) return null;
 
   let amount = null;
 
-  if (money.length >= 2) {
-    amount = money[money.length - 2].value;
-  } else if (previousBalance != null) {
+  // Running-balance delta is the strongest deterministic signal and also
+  // copes with ABSA layouts containing extra charge/value columns.
+  if (isFiniteMoney(previousBalance)) {
     amount = Number((balance - previousBalance).toFixed(2));
+  } else if (money.length >= 2) {
+    amount = money[money.length - 2].value;
   }
 
-  let descriptionEnd = joined.length;
-  if (money.length >= 2) {
-    descriptionEnd = money[money.length - 2].index;
-  } else {
-    descriptionEnd = money[money.length - 1].index;
-  }
+  if (!isFiniteMoney(amount)) return null;
+
+  // Description ends at the first money column rather than the penultimate
+  // token so extra fee/debit/credit columns cannot leak into the description.
+  const descriptionEnd = money[0]?.index ?? joined.length;
 
   let description = joined
     .slice(dateMatch[0].length, descriptionEnd)
     .replace(/\b(Settlement|Headoffice)\b/gi, "")
     .replace(/\b[ACTMS]\b(?=\s*\d|$)/g, "")
-    .replace(/\b\d+\.\d{2}A\b/g, "") // OCR junk like 40.00A
+    .replace(/\b\d+\.\d{2}A\b/g, "")
     .replace(/SERVICE FEE:.*$/i, "")
     .replace(/CREDIT INTEREST RATE.*$/i, "")
     .replace(/\s{2,}/g, " ")
@@ -164,21 +206,6 @@ function parseAbsaBlock(block, previousBalance = null) {
 
   if (!description) return null;
   if (DROP_DESCRIPTION_PATTERNS.some((re) => re.test(description))) return null;
-
-  if (previousBalance != null && amount != null) {
-    const debitCandidate = Number((previousBalance - Math.abs(amount)).toFixed(2));
-    const creditCandidate = Number((previousBalance + Math.abs(amount)).toFixed(2));
-
-    if (Math.abs(balance - debitCandidate) < 0.01) {
-      amount = -Math.abs(amount);
-    } else if (Math.abs(balance - creditCandidate) < 0.01) {
-      amount = Math.abs(amount);
-    } else {
-      amount = Number((balance - previousBalance).toFixed(2));
-    }
-  }
-
-  if (!amount || !balance) return null;
 
   if (Math.abs(amount) > 100000) return null;
   if (Math.abs(balance) > 10000000) return null;
@@ -193,12 +220,11 @@ function parseAbsaBlock(block, previousBalance = null) {
 
 export function extractAbsaTransactions(text, openingBalance = null) {
   const cleaned = truncateAtStatementEnd(cleanAbsaText(text));
-
   const lines = cleaned.split("\n");
   const blocks = splitIntoTransactionBlocks(lines);
 
   const transactions = [];
-  let previousBalance = openingBalance;
+  let previousBalance = isFiniteMoney(openingBalance) ? openingBalance : null;
 
   for (const block of blocks) {
     const tx = parseAbsaBlock(block, previousBalance);
@@ -211,13 +237,11 @@ export function extractAbsaTransactions(text, openingBalance = null) {
   return transactions;
 }
 
-// ✅ NEW: Client Name Extractor (MANDATORY FIX)
 export function extractAbsaClientName(text) {
   const match = String(text || "").match(
     /Cheque account statement\s+([A-Z][A-Z0-9&.,'\/\- ]+?)\s+40-\d{4}-\d{4}/i
   );
 
   if (!match) return null;
-
-  return match[1].trim();
+  return normalizeWhitespace(match[1]);
 }

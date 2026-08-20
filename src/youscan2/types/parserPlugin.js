@@ -1,59 +1,33 @@
 /**
- * YouScan 2.0
- * Parser plugin contract
+ * YouScan V2
+ * JSDoc-only parser plugin contract.
  */
 
-import type { ClassificationResult } from "./classification";
-import type { ParseResult } from "./parseResult";
-import type { ValidationResult } from "./validation";
+/**
+ * @typedef {Object} SchemaRegistryEntry
+ * @property {string} schemaKey
+ * @property {string} documentType
+ * @property {string} version
+ * @property {string} parserKey
+ * @property {string} validatorKey
+ * @property {string} normalizerKey
+ * @property {boolean} active
+ */
 
-export interface SchemaRegistryEntry {
-  schemaKey: string;
-  documentType: string;
-  version: string;
-  parserKey: string;
-  validatorKey: string;
-  normalizerKey: string;
-  active: boolean;
-}
+/**
+ * @typedef {Object} ParserContext
+ * @property {string} jobId
+ * @property {Object} [file]
+ * @property {string} [extractedText]
+ * @property {string} [textPreview]
+ * @property {Object} classification
+ * @property {SchemaRegistryEntry} schema
+ */
 
-export interface ParserContext {
-  jobId: string;
-  file?: {
-    originalname?: string;
-    [key: string]: unknown;
-  };
-  extractedText?: string;
-  textPreview?: string;
-  classification: ClassificationResult;
-  schema: SchemaRegistryEntry;
-}
+/**
+ * Parser plugins are runtime objects implementing:
+ * canHandle, extract, normalize, validate and toFinalResult.
+ * This file documents the contract without introducing TypeScript syntax.
+ */
 
-export interface ParserPlugin<TNormalized = unknown> {
-  key: string;
-  documentType: string;
-
-  canHandle(classification: ClassificationResult): boolean;
-
-  extract(context: ParserContext): Promise<unknown>;
-
-  normalize(raw: unknown, context: ParserContext): Promise<TNormalized>;
-
-  validate(
-    normalized: TNormalized,
-    context: ParserContext
-  ): Promise<ValidationResult>;
-
-  repair?(
-    context: ParserContext,
-    normalized: TNormalized,
-    validation: ValidationResult
-  ): Promise<TNormalized>;
-
-  toFinalResult(args: {
-    jobId: string;
-    classification: ClassificationResult;
-    normalized: TNormalized;
-    validation: ValidationResult;
-  }): Promise<ParseResult<TNormalized>>;
-}
+export {};

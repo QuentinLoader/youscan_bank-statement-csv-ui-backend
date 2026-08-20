@@ -1,29 +1,53 @@
+import { DOCUMENT_SUBTYPES } from "../registry/documentTypes.js";
 import { mapSubtypeToBankName } from "./shared/common.js";
 import { normalizeAbsaTransactions } from "./absa/normalizer.js";
+import { normalizeFnbTransactions } from "./fnb/normalizer.js";
+import { normalizeCapitecTransactions } from "./capitec/normalizer.js";
+import { normalizeNedbankTransactions } from "./nedbank/normalizer.js";
+import { normalizeDiscoveryTransactions } from "./discovery/normalizer.js";
 import { normalizeStandardBankTransactions } from "./standardbank/normalizer.js";
+
+function normalizeTransactionsBySubtype(raw, subtype, metadata) {
+  switch (subtype) {
+    case DOCUMENT_SUBTYPES.ABSA_STATEMENT:
+      return normalizeAbsaTransactions(raw?.transactions);
+
+    case DOCUMENT_SUBTYPES.FNB_STATEMENT:
+      return normalizeFnbTransactions(raw?.transactions);
+
+    case DOCUMENT_SUBTYPES.CAPITEC_STATEMENT:
+      return normalizeCapitecTransactions(raw?.transactions);
+
+    case DOCUMENT_SUBTYPES.NEDBANK_STATEMENT:
+      return normalizeNedbankTransactions(raw?.transactions);
+
+    case DOCUMENT_SUBTYPES.DISCOVERY_STATEMENT:
+      return normalizeDiscoveryTransactions(raw?.transactions);
+
+    case DOCUMENT_SUBTYPES.STANDARD_BANK_STATEMENT:
+      return normalizeStandardBankTransactions(
+        raw?.transactions,
+        metadata.statementPeriodEnd
+      );
+
+    default: {
+      const error = new Error(
+        `V2 bank normalizer is not implemented for subtype: ${subtype || "unknown"}`
+      );
+      error.code = "V2_BANK_NORMALIZER_NOT_IMPLEMENTED";
+      throw error;
+    }
+  }
+}
 
 export function buildBankStatementNormalization(raw) {
   const metadata = raw?.metadata || {};
   const subtype = raw?.detectedSubtype || metadata.bankName || "";
 
-  const bankName =
-    metadata.bankName && metadata.bankName !== "unknown"
-      ? mapSubtypeToBankName(metadata.bankName)
-      : mapSubtypeToBankName(subtype);
-
-  const isStandardBank =
-    String(subtype || "").toLowerCase().includes("standard_bank") ||
-    String(subtype || "").toLowerCase().includes("standard bank");
-
-  const transactions = isStandardBank
-    ? normalizeStandardBankTransactions(
-        raw?.transactions,
-        metadata.statementPeriodEnd
-      )
-    : normalizeAbsaTransactions(raw?.transactions);
+  const transactions = normalizeTransactionsBySubtype(raw, subtype, metadata);
 
   return {
-    bankName,
+    bankName: mapSubtypeToBankName(subtype),
     accountNumber: metadata.accountNumber || null,
     clientName: metadata.clientName || null,
     statementPeriodStart: metadata.statementPeriodStart || null,

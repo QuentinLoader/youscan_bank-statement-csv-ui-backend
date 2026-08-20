@@ -145,10 +145,50 @@ export function extractStatementPeriod(text) {
   return { start: null, end: null };
 }
 
+export function extractStandardBankAccountNumber(text) {
+  const source = String(text || "");
+  const match = source.match(
+    /^\s*Account Number[ \t:]*([0-9][0-9 \t-]{8,24})\s*$/im
+  );
+
+  if (!match) return null;
+
+  const digits = match[1].replace(/\D/g, "");
+  return digits.length >= 10 ? digits : null;
+}
+
+export function extractStandardBankClientName(text) {
+  const source = String(text || "");
+
+  const explicitPatterns = [
+    /^\s*Account Holder[ \t:]+(.+?)\s*$/im,
+    /^\s*Customer Name[ \t:]+(.+?)\s*$/im,
+    /^\s*Account Name[ \t:]+(.+?)\s*$/im,
+  ];
+
+  for (const pattern of explicitPatterns) {
+    const match = source.match(pattern);
+    if (match) {
+      const candidate = normalizeWhitespace(match[1]);
+      if (candidate) return candidate;
+    }
+  }
+
+  const titledName = source.match(
+    /^\s*((?:MR|MRS|MS|DR|PROF)\.?[ \t]+[A-Z][A-Z .'-]{1,80})\s*$/im
+  );
+
+  if (titledName) {
+    return normalizeWhitespace(titledName[1]);
+  }
+
+  return null;
+}
+
 export function extractStandardBankOpeningBalance(text) {
   const patterns = [
-    /BALANCE BROUGHT FORWARD\s+([0-9,\s.:-]+)/i,
-    /balance brought forward[:\s]+([0-9,\s.:-]+)/i,
+    /BALANCE BROUGHT FORWARD[ \t:]*([0-9][0-9, ]*\.\d{2}-?)/i,
+    /opening balance[ \t:]*([0-9][0-9, ]*\.\d{2}-?)/i,
   ];
 
   for (const pattern of patterns) {
@@ -164,10 +204,11 @@ export function extractStandardBankOpeningBalance(text) {
 
 export function extractStandardBankClosingBalance(text) {
   const patterns = [
-    /Month-end BalanceR?([0-9,\s.:-]+)/i,
-    /closing balance[:\s]+([0-9,\s.:-]+)/i,
-    /final balance[:\s]+([0-9,\s.:-]+)/i,
-    /current balance[:\s]+([0-9,\s.:-]+)/i,
+    /Month-end Balance[ \t]*R?[ \t]*([0-9][0-9, ]*\.\d{2}-?)/i,
+    /Balance outstanding at date of statement[ \t:]*([0-9][0-9, ]*\.\d{2}-?)/i,
+    /closing balance[ \t:]*([0-9][0-9, ]*\.\d{2}-?)/i,
+    /final balance[ \t:]*([0-9][0-9, ]*\.\d{2}-?)/i,
+    /current balance[ \t:]*([0-9][0-9, ]*\.\d{2}-?)/i,
   ];
 
   for (const pattern of patterns) {
@@ -179,4 +220,356 @@ export function extractStandardBankClosingBalance(text) {
   }
 
   return null;
+}
+
+
+function parseFnbSignedBalance(value, marker) {
+  if (!value) return null;
+
+  const parsed = parseLooseMoney(value);
+  if (parsed === null) return null;
+
+  const sign = String(marker || "").toLowerCase();
+  if (sign === "dr") return -Math.abs(parsed);
+  if (sign === "cr") return Math.abs(parsed);
+  return parsed;
+}
+
+export function extractFnbAccountNumber(text) {
+  const source = String(text || "");
+  const patterns = [
+    /Gold Business Account\s*:\s*([0-9][0-9\s-]{8,24})/i,
+    /FNB\s+(?:Account|Acc)\s*(?:Number|No)?\s*:\s*([0-9][0-9\s-]{8,24})/i,
+    /^\s*Account\s*:\s*([0-9][0-9\s-]{8,24})\s*$/im,
+    /^\s*Account Number\s*:\s*([0-9][0-9\s-]{8,24})\s*$/im,
+  ];
+
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (!match) continue;
+
+    const digits = match[1].replace(/\D/g, "");
+    if (digits.length >= 9) return digits;
+  }
+
+  return null;
+}
+
+export function extractFnbClientName(text) {
+  const source = String(text || "");
+  const patterns = [
+    /^\s*\*([^\n]{3,120})\s*$/im,
+    /^\s*Account Holder\s*:\s*([^\n]{3,120})\s*$/im,
+    /^\s*Customer Name\s*:\s*([^\n]{3,120})\s*$/im,
+  ];
+
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (!match) continue;
+
+    const candidate = normalizeWhitespace(match[1]);
+    if (candidate) return candidate;
+  }
+
+  return null;
+}
+
+export function extractFnbStatementPeriod(text) {
+  const source = String(text || "");
+  const patterns = [
+    /Statement Period\s*:\s*(\d{1,2}\s+[A-Za-z]+\s+\d{4})\s+to\s+(\d{1,2}\s+[A-Za-z]+\s+\d{4})/i,
+    /Staat Periode\s*:\s*(\d{1,2}\s+[A-Za-z]+\s+\d{4})\s+tot\s+(\d{1,2}\s+[A-Za-z]+\s+\d{4})/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (match) {
+      return {
+        start: normalizeWhitespace(match[1]),
+        end: normalizeWhitespace(match[2]),
+      };
+    }
+  }
+
+  return { start: null, end: null };
+}
+
+export function extractFnbOpeningBalance(text) {
+  const match = String(text || "").match(
+    /Opening Balance\s*([0-9][0-9,\s]*\.\d{2})\s*(Cr|Dr)?/i
+  );
+
+  return match ? parseFnbSignedBalance(match[1], match[2]) : null;
+}
+
+export function extractFnbClosingBalance(text) {
+  const match = String(text || "").match(
+    /Closing Balance\s*([0-9][0-9,\s]*\.\d{2})\s*(Cr|Dr)?/i
+  );
+
+  return match ? parseFnbSignedBalance(match[1], match[2]) : null;
+}
+
+
+function parseCapitecSignedMoney(value) {
+  if (!value) return null;
+
+  const raw = String(value).replace(/^R\s*/i, "").replace(/\s+/g, "").trim();
+  const negative = raw.startsWith("-");
+  const parsed = parseLooseMoney(raw.replace(/^-/, ""));
+  if (parsed === null) return null;
+
+  return negative ? -Math.abs(parsed) : parsed;
+}
+
+export function extractCapitecAccountNumber(text) {
+  const source = String(text || "");
+  const patterns = [
+    /^\s*Account\s*(?:Number|No)?\s*[:]?\s*\n?\s*([0-9]{9,12})\s*$/im,
+    /^\s*Account Number\s*[:]?\s*([0-9]{9,12})\s*$/im,
+  ];
+
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (match) return match[1];
+  }
+
+  return null;
+}
+
+export function extractCapitecClientName(text) {
+  const source = String(text || "");
+
+  const anchored = source.match(
+    /Main Account Statement\s*\n\s*((?:MR|MRS|MS|DR|PROF)\.?\s+[^\n]{2,100})/i
+  );
+  if (anchored) {
+    const candidate = normalizeWhitespace(anchored[1]);
+    if (candidate) return candidate;
+  }
+
+  const fallback = source.match(
+    /^\s*((?:MR|MRS|MS|DR|PROF)\.?\s+[A-Z][A-Z .'-]{2,100})\s*$/im
+  );
+
+  return fallback ? normalizeWhitespace(fallback[1]) : null;
+}
+
+export function extractCapitecStatementPeriod(text) {
+  const source = String(text || "");
+  const from = source.match(/From Date\s*:\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/i);
+  const to = source.match(/To Date\s*:\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/i);
+
+  return {
+    start: from ? normalizeWhitespace(from[1]) : null,
+    end: to ? normalizeWhitespace(to[1]) : null,
+  };
+}
+
+export function extractCapitecOpeningBalance(text) {
+  const match = String(text || "").match(
+    /Opening Balance\s*:\s*R?\s*(-?(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2})/i
+  );
+
+  return match ? parseCapitecSignedMoney(match[1]) : null;
+}
+
+export function extractCapitecClosingBalance(text) {
+  const match = String(text || "").match(
+    /Closing Balance\s*:\s*R?\s*(-?(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2})/i
+  );
+
+  return match ? parseCapitecSignedMoney(match[1]) : null;
+}
+
+
+function parseNedbankSignedMoney(value, marker = "") {
+  if (!value) return null;
+
+  const raw = String(value).replace(/^R\s*/i, "").trim();
+  const parsed = parseLooseMoney(raw);
+  if (parsed === null) return null;
+
+  const sign = String(marker || "").toLowerCase();
+  if (sign === "dr") return -Math.abs(parsed);
+  if (sign === "cr") return Math.abs(parsed);
+  return parsed;
+}
+
+export function extractNedbankAccountNumber(text) {
+  const source = String(text || "");
+  const patterns = [
+    /^\s*Account\s*number\s*[:]?\s*([0-9][0-9\s-]{8,24})\s*$/im,
+    /^\s*Account\s*(?:No|Number)\s*[:]\s*([0-9][0-9\s-]{8,24})\s*$/im,
+    /\b(1605\d{6})\b/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (!match) continue;
+
+    const digits = match[1].replace(/\D/g, "");
+    if (digits.length >= 9) return digits;
+  }
+
+  return null;
+}
+
+export function extractNedbankClientName(text) {
+  const source = String(text || "");
+  const explicitPatterns = [
+    /^\s*Account Holder\s*:\s*([^\n]{3,120})\s*$/im,
+    /^\s*Customer Name\s*:\s*([^\n]{3,120})\s*$/im,
+  ];
+
+  for (const pattern of explicitPatterns) {
+    const match = source.match(pattern);
+    if (match) {
+      const candidate = normalizeWhitespace(match[1]);
+      if (candidate) return candidate;
+    }
+  }
+
+  const titled = source.match(
+    /^\s*((?:MR|MRS|MS|DR|PROF)\.?\s+[A-Z][A-Z .'-]{2,100})\s*$/im
+  );
+
+  return titled ? normalizeWhitespace(titled[1]) : null;
+}
+
+export function extractNedbankStatementPeriod(text) {
+  const source = String(text || "");
+  const patterns = [
+    /Statement\s*period\s*:\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})\s*(?:to|[-–])\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/i,
+    /Period\s*:\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})\s*(?:to|[-–])\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (match) {
+      return {
+        start: normalizeWhitespace(match[1]),
+        end: normalizeWhitespace(match[2]),
+      };
+    }
+  }
+
+  return { start: null, end: null };
+}
+
+export function extractNedbankOpeningBalance(text) {
+  const match = String(text || "").match(
+    /Opening\s*balance\s*:?\s*R?\s*(-?(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2})\s*(Cr|Dr)?/i
+  );
+
+  return match ? parseNedbankSignedMoney(match[1], match[2]) : null;
+}
+
+export function extractNedbankClosingBalance(text) {
+  const match = String(text || "").match(
+    /Closing\s*balance\s*:?\s*R?\s*(-?(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2})\s*(Cr|Dr)?/i
+  );
+
+  return match ? parseNedbankSignedMoney(match[1], match[2]) : null;
+}
+
+
+function parseDiscoverySignedMoney(value, marker = "") {
+  if (!value) return null;
+
+  let raw = String(value)
+    .replace(/^\s*-?\s*R\s*/i, (prefix) => (prefix.includes("-") ? "-" : ""))
+    .replace(/\s+/g, "")
+    .trim();
+
+  let negative = raw.startsWith("-");
+  if (raw.endsWith("-")) {
+    negative = true;
+    raw = raw.slice(0, -1);
+  }
+
+  const parsed = parseLooseMoney(raw.replace(/^-/, ""));
+  if (parsed === null) return null;
+
+  const sign = String(marker || "").toLowerCase();
+  if (sign === "dr") return -Math.abs(parsed);
+  if (sign === "cr") return Math.abs(parsed);
+  return negative ? -Math.abs(parsed) : parsed;
+}
+
+export function extractDiscoveryAccountNumber(text) {
+  const source = String(text || "");
+  const patterns = [
+    /Transaction\s+Account[^\d]*(\d{10,15})/i,
+    /^\s*Account\s*(?:Number|No)?\s*:\s*(\d{10,15})\s*$/im,
+  ];
+
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (match) return match[1];
+  }
+
+  return null;
+}
+
+export function extractDiscoveryClientName(text) {
+  const source = String(text || "");
+  const explicitPatterns = [
+    /^\s*Account Holder\s*:\s*([^\n]{3,120})\s*$/im,
+    /^\s*Customer Name\s*:\s*([^\n]{3,120})\s*$/im,
+  ];
+
+  for (const pattern of explicitPatterns) {
+    const match = source.match(pattern);
+    if (match) {
+      const candidate = normalizeWhitespace(match[1]);
+      if (candidate) return candidate;
+    }
+  }
+
+  const titled = source.match(
+    /^\s*((?:MR|MRS|MS|DR|PROF)\.?\s+[A-Z][A-Z .'-]{2,100})\s*$/im
+  );
+
+  return titled ? normalizeWhitespace(titled[1]) : null;
+}
+
+export function extractDiscoveryStatementPeriod(text) {
+  const source = String(text || "");
+  const namedDate = "(\\d{1,2}\\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[A-Za-z]*\\s+\\d{4})";
+  const numericDate = "(\\d{1,2}[\\/-]\\d{1,2}[\\/-]\\d{4})";
+  const patterns = [
+    new RegExp(`Statement\\s*period\\s*:\\s*${namedDate}\\s*(?:to|[-–])\\s*${namedDate}`, "i"),
+    new RegExp(`Statement\\s*period\\s*:\\s*${numericDate}\\s*(?:to|[-–])\\s*${numericDate}`, "i"),
+    new RegExp(`From\\s+${namedDate}\\s+to\\s+${namedDate}`, "i"),
+    new RegExp(`From\\s+${numericDate}\\s+to\\s+${numericDate}`, "i"),
+  ];
+
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (match) {
+      return {
+        start: normalizeWhitespace(match[1]),
+        end: normalizeWhitespace(match[2]),
+      };
+    }
+  }
+
+  return { start: null, end: null };
+}
+
+export function extractDiscoveryOpeningBalance(text) {
+  const match = String(text || "").match(
+    /Opening\s+balance\s*:?\s*(-?\s*R\s*(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2}-?)\s*(Cr|Dr)?/i
+  );
+
+  return match ? parseDiscoverySignedMoney(match[1], match[2]) : null;
+}
+
+export function extractDiscoveryClosingBalance(text) {
+  const match = String(text || "").match(
+    /Closing\s+balance\s*:?\s*(-?\s*R\s*(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2}-?)\s*(Cr|Dr)?/i
+  );
+
+  return match ? parseDiscoverySignedMoney(match[1], match[2]) : null;
 }

@@ -1,22 +1,26 @@
 /**
- * YouScan 2.0
- * Validation types
+ * YouScan V2
+ * JSDoc-only validation contracts.
  */
 
-export type ValidationSeverity = "info" | "warning" | "error";
-export type ValidationStatus = "passed" | "passed_with_warnings" | "failed";
+/** @typedef {"info"|"warning"|"error"} ValidationSeverity */
+/** @typedef {"passed"|"passed_with_warnings"|"failed"} ValidationStatus */
 
-export interface ValidationIssue {
-  severity: ValidationSeverity;
-  issueType: string;
-  message: string;
-  rowIndex?: number | null;
-  metadata?: Record<string, unknown>;
-}
+/**
+ * @typedef {Object} ValidationIssue
+ * @property {ValidationSeverity} severity
+ * @property {string} issueType
+ * @property {string} message
+ * @property {number|null} [rowIndex]
+ * @property {Object<string, unknown>} [metadata]
+ */
 
-export interface ValidationResult {
-  valid: boolean;
-  status: ValidationStatus;
-  issues: ValidationIssue[];
-  score: number;
-}
+/**
+ * @typedef {Object} ValidationResult
+ * @property {boolean} valid
+ * @property {ValidationStatus} status
+ * @property {ValidationIssue[]} issues
+ * @property {number} score
+ */
+
+export {};

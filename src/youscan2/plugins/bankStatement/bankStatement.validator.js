@@ -1,7 +1,9 @@
 /**
- * YouScan 2.0
- * Bank statement validator
+ * YouScan V2
+ * Bank statement validator.
  */
+
+import { validateBankStatementShape } from "../../schemas/bankStatement.v1.js";
 
 function isNumber(value) {
   return typeof value === "number" && Number.isFinite(value);
@@ -16,9 +18,24 @@ function hasTooManyDecimals(value) {
   return Math.abs(value * 100 - Math.round(value * 100)) > 0.000001;
 }
 
+function isValidTransactionDate(value) {
+  const match = String(value || "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) return false;
+
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
 function looksLikeDebit(description = "") {
   const lower = String(description).toLowerCase();
-
   const debitSignals = [
     "fee",
     "charge",
@@ -29,14 +46,14 @@ function looksLikeDebit(description = "") {
     "monthly acc fee",
     "transaction charge",
     "notific fee",
+    "card purchase",
   ];
 
-  return debitSignals.some(signal => lower.includes(signal));
+  return debitSignals.some((signal) => lower.includes(signal));
 }
 
 function looksLikeCredit(description = "") {
   const lower = String(description).toLowerCase();
-
   const creditSignals = [
     "credit",
     "payment cr",
@@ -47,7 +64,7 @@ function looksLikeCredit(description = "") {
     "cash deposit",
   ];
 
-  return creditSignals.some(signal => lower.includes(signal));
+  return creditSignals.some((signal) => lower.includes(signal));
 }
 
 function addIssue(issues, issue) {
@@ -60,15 +77,23 @@ export async function validateBankStatement(normalized) {
     ? normalized.transactions
     : [];
 
-  const openingBalance = normalized?.openingBalance;
-  const closingBalance = normalized?.closingBalance;
-  const accountNumber = normalized?.accountNumber;
-  const clientName = normalized?.clientName;
-  const statementPeriodStart = normalized?.statementPeriodStart;
-  const statementPeriodEnd = normalized?.statementPeriodEnd;
-
   let warningCount = 0;
   let errorCount = 0;
+
+  // First enforce the canonical V2 contract before semantic reconciliation.
+  const shapeValidation = validateBankStatementShape(normalized);
+  if (!shapeValidation.valid) {
+    for (const message of shapeValidation.issues) {
+      addIssue(issues, {
+        severity: "error",
+        issueType: "schema_shape_error",
+        message,
+        rowIndex: null,
+        metadata: {},
+      });
+      errorCount++;
+    }
+  }
 
   if (!transactions.length) {
     addIssue(issues, {
@@ -87,7 +112,13 @@ export async function validateBankStatement(normalized) {
     };
   }
 
-  // Metadata checks
+  const openingBalance = normalized?.openingBalance;
+  const closingBalance = normalized?.closingBalance;
+  const accountNumber = normalized?.accountNumber;
+  const clientName = normalized?.clientName;
+  const statementPeriodStart = normalized?.statementPeriodStart;
+  const statementPeriodEnd = normalized?.statementPeriodEnd;
+
   if (!accountNumber) {
     addIssue(issues, {
       severity: "warning",
@@ -116,10 +147,7 @@ export async function validateBankStatement(normalized) {
       issueType: "missing_statement_period",
       message: "Statement period could not be extracted fully.",
       rowIndex: null,
-      metadata: {
-        statementPeriodStart,
-        statementPeriodEnd,
-      },
+      metadata: { statementPeriodStart, statementPeriodEnd },
     });
     warningCount++;
   }
@@ -168,7 +196,6 @@ export async function validateBankStatement(normalized) {
     warningCount++;
   }
 
-  // Row checks
   for (let i = 0; i < transactions.length; i++) {
     const tx = transactions[i];
     const description = tx?.description || "";
@@ -184,6 +211,15 @@ export async function validateBankStatement(normalized) {
         metadata: { transaction: tx },
       });
       warningCount++;
+    } else if (!isValidTransactionDate(tx.date)) {
+      addIssue(issues, {
+        severity: "error",
+        issueType: "invalid_date",
+        message: "Transaction date is not a valid DD/MM/YYYY calendar date.",
+        rowIndex: i,
+        metadata: { transaction: tx },
+      });
+      errorCount++;
     }
 
     if (!description) {
@@ -242,10 +278,7 @@ export async function validateBankStatement(normalized) {
       warningCount++;
     }
 
-    const debitLike = looksLikeDebit(description);
-    const creditLike = looksLikeCredit(description);
-
-    if (debitLike && amount > 0) {
+    if (looksLikeDebit(description) && amount > 0) {
       addIssue(issues, {
         severity: "warning",
         issueType: "possible_wrong_sign_debit",
@@ -256,7 +289,7 @@ export async function validateBankStatement(normalized) {
       warningCount++;
     }
 
-    if (creditLike && amount < 0) {
+    if (looksLikeCredit(description) && amount < 0) {
       addIssue(issues, {
         severity: "warning",
         issueType: "possible_wrong_sign_credit",
@@ -268,22 +301,20 @@ export async function validateBankStatement(normalized) {
     }
 
     if (i > 0) {
-      const prev = transactions[i - 1];
-
-      if (isNumber(prev?.balance) && isNumber(balance) && isNumber(amount)) {
-        const diff = round2(balance - prev.balance);
-
-        if (diff !== 0 && round2(diff) !== round2(amount)) {
+      const previous = transactions[i - 1];
+      if (isNumber(previous?.balance) && isNumber(balance) && isNumber(amount)) {
+        const delta = round2(balance - previous.balance);
+        if (delta !== round2(amount)) {
           addIssue(issues, {
             severity: "warning",
             issueType: "balance_continuity_mismatch",
             message: "Balance does not reconcile cleanly with the previous row.",
             rowIndex: i,
             metadata: {
-              previousBalance: prev.balance,
+              previousBalance: previous.balance,
               amount,
               currentBalance: balance,
-              expectedDelta: diff,
+              expectedDelta: delta,
               transaction: tx,
             },
           });
@@ -293,10 +324,8 @@ export async function validateBankStatement(normalized) {
     }
   }
 
-  // Opening balance reconciliation
   if (isNumber(openingBalance) && transactions.length > 0) {
     const firstTx = transactions[0];
-
     if (isNumber(firstTx.amount) && isNumber(firstTx.balance)) {
       const expectedFirstBalance = round2(openingBalance + firstTx.amount);
       const actualFirstBalance = round2(firstTx.balance);
@@ -319,10 +348,8 @@ export async function validateBankStatement(normalized) {
     }
   }
 
-  // Closing balance reconciliation
   if (isNumber(closingBalance) && transactions.length > 0) {
     const lastTx = transactions[transactions.length - 1];
-
     if (isNumber(lastTx.balance)) {
       const actualClosingBalance = round2(lastTx.balance);
       const expectedClosingBalance = round2(closingBalance);
@@ -356,12 +383,11 @@ export async function validateBankStatement(normalized) {
   }
 
   const rawScore = Math.max(0, 1 - (errorCount * 0.35 + warningCount * 0.05));
-  const score = round2(rawScore);
 
   return {
     valid,
     status,
     issues,
-    score,
+    score: round2(rawScore),
   };
 }

@@ -1,6 +1,10 @@
 /**
- * YouScan 2.0
- * Standard Bank transaction normalizer
+ * YouScan V2
+ * Standard Bank transaction normalizer.
+ *
+ * Debit/credit direction is resolved in the extractor using the statement's
+ * running balances. The normalizer must not second-guess that evidence from
+ * description keywords such as "credit".
  */
 
 function isValidDateString(value) {
@@ -12,8 +16,15 @@ function isValidDateString(value) {
   const dd = Number(match[1]);
   const mm = Number(match[2]);
   const yyyy = Number(match[3]);
+  const date = new Date(Date.UTC(yyyy, mm - 1, dd));
 
-  return dd >= 1 && dd <= 31 && mm >= 1 && mm <= 12 && yyyy >= 2000 && yyyy <= 2100;
+  return (
+    yyyy >= 2000 &&
+    yyyy <= 2100 &&
+    date.getUTCFullYear() === yyyy &&
+    date.getUTCMonth() === mm - 1 &&
+    date.getUTCDate() === dd
+  );
 }
 
 function extractStatementEndYear(statementPeriodEnd) {
@@ -25,7 +36,7 @@ function extractStatementEndYear(statementPeriodEnd) {
   match = text.match(/\b(\d{4})\b/);
   if (match) return Number(match[1]);
 
-  return 2026;
+  return new Date().getUTCFullYear();
 }
 
 function resolveYear(yy, statementEndYear) {
@@ -38,42 +49,26 @@ function resolveYear(yy, statementEndYear) {
   return candidate;
 }
 
-function extractDateFromDescription(description, statementEndYear = 2026) {
+function extractDateFromDescription(description, statementEndYear) {
   const text = String(description || "").trim();
 
   let match = text.match(/ROL(\d{2})(\d{2})(\d{2})/i);
   if (match) {
     const dd = match[1];
     const mm = match[2];
-    const yy = Number(match[3]);
-    const yyyy = resolveYear(yy, statementEndYear);
+    const yyyy = resolveYear(Number(match[3]), statementEndYear);
     return `${dd}/${mm}/${yyyy}`;
   }
 
-  match = text.match(/(\d{6})$/);
+  match = text.match(/(?:^|\s)(\d{6})(?:$|\s)/);
   if (match) {
     const token = match[1];
     const dd = Number(token.slice(0, 2));
     const mm = Number(token.slice(2, 4));
-    const yy = Number(token.slice(4, 6));
+    const yyyy = resolveYear(Number(token.slice(4, 6)), statementEndYear);
+    const candidate = `${token.slice(0, 2)}/${token.slice(2, 4)}/${yyyy}`;
 
-    if (dd >= 1 && dd <= 31 && mm >= 1 && mm <= 12) {
-      const yyyy = resolveYear(yy, statementEndYear);
-      return `${token.slice(0, 2)}/${token.slice(2, 4)}/${yyyy}`;
-    }
-  }
-
-  match = text.match(/\b(\d{6})\b/);
-  if (match) {
-    const token = match[1];
-    const dd = Number(token.slice(0, 2));
-    const mm = Number(token.slice(2, 4));
-    const yy = Number(token.slice(4, 6));
-
-    if (dd >= 1 && dd <= 31 && mm >= 1 && mm <= 12) {
-      const yyyy = resolveYear(yy, statementEndYear);
-      return `${token.slice(0, 2)}/${token.slice(2, 4)}/${yyyy}`;
-    }
+    if (isValidDateString(candidate)) return candidate;
   }
 
   return null;
@@ -97,26 +92,25 @@ function shouldRemoveTransaction(description) {
 
 function normalizeStandardBankTransaction(tx, statementEndYear) {
   const description = String(tx?.description || "").trim();
-  const upper = description.toUpperCase();
 
   const normalized = {
     date: tx?.date || null,
     description,
-    amount: typeof tx?.amount === "number" ? Number(tx.amount.toFixed(2)) : null,
-    balance: typeof tx?.balance === "number" ? Number(tx.balance.toFixed(2)) : null,
+    amount:
+      typeof tx?.amount === "number" && Number.isFinite(tx.amount)
+        ? Number(tx.amount.toFixed(2))
+        : null,
+    balance:
+      typeof tx?.balance === "number" && Number.isFinite(tx.balance)
+        ? Number(tx.balance.toFixed(2))
+        : null,
   };
 
   if (!isValidDateString(normalized.date)) {
-    normalized.date = extractDateFromDescription(description, statementEndYear);
-  }
-
-  if (
-    normalized.amount != null &&
-    upper.includes("CREDIT") &&
-    !upper.includes("DEBIT") &&
-    !upper.includes("DEBIT ORDER")
-  ) {
-    normalized.amount = Math.abs(normalized.amount);
+    normalized.date = extractDateFromDescription(
+      description,
+      statementEndYear
+    );
   }
 
   return normalized;
@@ -135,9 +129,7 @@ export function normalizeStandardBankTransactions(
     if (!tx) continue;
     if (shouldRemoveTransaction(tx.description)) continue;
 
-    normalized.push(
-      normalizeStandardBankTransaction(tx, statementEndYear)
-    );
+    normalized.push(normalizeStandardBankTransaction(tx, statementEndYear));
   }
 
   return normalized;

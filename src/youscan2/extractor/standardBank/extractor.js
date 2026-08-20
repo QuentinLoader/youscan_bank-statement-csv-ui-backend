@@ -5,44 +5,36 @@ import {
 } from "../shared/money.js";
 import { extractStandardBankDate } from "../shared/dates.js";
 
-function buildCombinedBalanceCandidate(line) {
-  const raw = normalizeWhitespace(line);
-  const matches = raw.match(/\d[\d\s,]*\.\d{2}-?/g);
-  if (!matches || matches.length === 0) return null;
-  return matches[matches.length - 1];
+function round2(value) {
+  return Number(Number(value).toFixed(2));
+}
+
+function extractStandardBankMoneyTokens(line) {
+  const raw = normalizeWhitespace(String(line || ""));
+  if (!raw) return [];
+
+  return raw.match(/\d[\d\s,]*\.\d{2}-?/g) || [];
 }
 
 function extractStandardBankMoneyPair(line) {
-  const raw = normalizeWhitespace(String(line || ""));
-  if (!raw) return null;
+  const tokens = extractStandardBankMoneyTokens(line);
 
-  const amountMatch = raw.match(/^\D*(\d[\d,]*\.\d{2}-?)/);
-  if (!amountMatch) return null;
+  // Standard Bank transaction rows must contain both a transaction amount
+  // and a running balance. This prevents opening/closing balance metadata
+  // rows from being misclassified as transactions.
+  if (tokens.length < 2) return null;
 
-  const amountRaw = amountMatch[1];
-  const amount = cleanStandardBankMoneyToken(amountRaw);
-  if (amount === null) return null;
+  const amount = cleanStandardBankMoneyToken(tokens[0]);
+  const balance = parseStandardBankBalanceToken(tokens[tokens.length - 1]);
 
-  const combinedBalanceCandidate = buildCombinedBalanceCandidate(raw);
-
-  let balance = null;
-
-  if (combinedBalanceCandidate) {
-    balance = parseStandardBankBalanceToken(combinedBalanceCandidate);
-  }
-
-  if (balance === null) {
-    const allMatches = raw.match(/\d[\d\s,]*\.\d{2}-?/g);
-    if (!allMatches || allMatches.length < 2) return null;
-    balance = parseStandardBankBalanceToken(allMatches[allMatches.length - 1]);
-  }
-
-  if (balance === null) return null;
-
-  if (Math.abs(amount) > 1_000_000) return null;
+  if (amount === null || balance === null) return null;
+  if (Math.abs(amount) > 5_000_000) return null;
   if (Math.abs(balance) > 100_000_000) return null;
 
-  return { amount, balance };
+  return {
+    amount: round2(amount),
+    balance: round2(balance),
+  };
 }
 
 function isStandardBankMarkerLine(line) {
@@ -50,7 +42,9 @@ function isStandardBankMarkerLine(line) {
 }
 
 function isStandardBankReversalMarker(line) {
-  return normalizeWhitespace(line).toUpperCase().includes("RTD-NOT PROVIDED FOR");
+  return normalizeWhitespace(line)
+    .toUpperCase()
+    .includes("RTD-NOT PROVIDED FOR");
 }
 
 function isStandardBankHeaderOrNoise(line) {
@@ -66,40 +60,74 @@ function isStandardBankHeaderOrNoise(line) {
     v === "balance brought forward" ||
     v === "month-end balance" ||
     v.startsWith("page ") ||
+    v.startsWith("account number") ||
+    v.startsWith("statement from") ||
     v.includes("customer care centre") ||
     v.includes("statement / invoice") ||
     v.includes("bank statement / tax invoice") ||
-    v.includes("account number") ||
-    v.includes("standard bank") ||
+    v.includes("standard bank of south africa") ||
     v.includes("the ombudsman for banking services") ||
     v.includes("registered credit provider") ||
     v.includes("please verify all transactions") ||
     v.includes("please visit our website") ||
     v.includes("vat reg no") ||
-    v.includes("monthly email") ||
-    v.includes("mall at carnival") ||
-    v.includes("marshalltown") ||
-    v.includes("achieva current account") ||
-    v.includes("mr. ja loader") ||
-    v.includes("5 kiaat st") ||
-    v.includes("dalpark")
+    v.includes("monthly email")
   );
 }
 
-function isStandardBankReferenceLine(line) {
+function isCompactStandardBankReferenceLine(line) {
   const v = normalizeWhitespace(line);
-  if (!v) return false;
+  if (!v || v.length > 80) return false;
 
   return (
-    /\b\d{6}\b/.test(v) ||
-    /\bROL\d{6}\b/i.test(v) ||
-    /\bSBSA\b/i.test(v) ||
-    /\bVODACOM\b/i.test(v) ||
-    /\bLENDPLUS\b/i.test(v) ||
-    /\bAUTOPAY\b/i.test(v) ||
-    /\bMBD\b/i.test(v) ||
-    /\bSF\d+\b/i.test(v)
+    /^\d{6}$/i.test(v) ||
+    /^ROL\d{6}$/i.test(v) ||
+    /^(?:SBSA|VODACOM|LENDPLUS|AUTOPAY|MBD)(?:\s+[A-Z0-9./-]+){0,4}$/i.test(v) ||
+    /^SF\d+(?:\s+[A-Z0-9./-]+){0,3}$/i.test(v)
   );
+}
+
+function findPreviousDescription(lines, startIndex) {
+  for (let i = startIndex; i >= 0 && i >= startIndex - 3; i--) {
+    const candidate = lines[i];
+    if (!candidate) continue;
+    if (isStandardBankMarkerLine(candidate)) continue;
+    if (isStandardBankHeaderOrNoise(candidate)) continue;
+    if (isStandardBankReversalMarker(candidate)) continue;
+    if (isCompactStandardBankReferenceLine(candidate)) continue;
+    if (extractStandardBankMoneyPair(candidate)) continue;
+    return candidate;
+  }
+
+  return "";
+}
+
+function getStandardBankTransactionContext(lines, moneyLineIndex) {
+  const previous = lines[moneyLineIndex - 1] || "";
+  let description = "";
+  let reference = "";
+
+  if (isCompactStandardBankReferenceLine(previous)) {
+    reference = previous;
+    description = findPreviousDescription(lines, moneyLineIndex - 2);
+  } else if (isStandardBankMarkerLine(previous)) {
+    description = findPreviousDescription(lines, moneyLineIndex - 2);
+  } else if (
+    !isStandardBankHeaderOrNoise(previous) &&
+    !isStandardBankReversalMarker(previous) &&
+    !extractStandardBankMoneyPair(previous)
+  ) {
+    description = previous;
+  }
+
+  if (!reference) {
+    const next = lines[moneyLineIndex + 1] || "";
+    if (isCompactStandardBankReferenceLine(next)) {
+      reference = next;
+    }
+  }
+
+  return { description, reference };
 }
 
 function shouldSkipStandardBankBlock(description, reference) {
@@ -117,77 +145,24 @@ function shouldSkipStandardBankBlock(description, reference) {
 function shouldSkipStandardBankTransaction(tx) {
   if (!tx) return true;
 
-  if (typeof tx.amount !== "number" || typeof tx.balance !== "number") return true;
+  if (typeof tx.amount !== "number" || !Number.isFinite(tx.amount)) return true;
+  if (typeof tx.balance !== "number" || !Number.isFinite(tx.balance)) return true;
   if (Math.abs(tx.amount) > 5_000_000) return true;
   if (Math.abs(tx.balance) > 100_000_000) return true;
 
   return false;
 }
 
-function getStandardBankDescription(lines, i) {
-  const prev = lines[i - 1];
-  if (!prev) return "";
-
-  if (isStandardBankMarkerLine(prev)) {
-    const prev2 = lines[i - 2];
-    if (
-      prev2 &&
-      !isStandardBankHeaderOrNoise(prev2) &&
-      !extractStandardBankMoneyPair(prev2) &&
-      !isStandardBankReversalMarker(prev2)
-    ) {
-      return prev2;
-    }
-    return "";
-  }
-
-  if (
-    !isStandardBankHeaderOrNoise(prev) &&
-    !extractStandardBankMoneyPair(prev) &&
-    !isStandardBankReversalMarker(prev)
-  ) {
-    return prev;
-  }
-
-  return "";
-}
-
-function getStandardBankReference(lines, i, description) {
-  const next = lines[i + 1];
-  if (
-    next &&
-    isStandardBankReferenceLine(next) &&
-    !extractStandardBankMoneyPair(next)
-  ) {
-    return next;
-  }
-
-  const descLower = normalizeWhitespace(description).toLowerCase();
-  const isFeeFollowup =
-    descLower === "fee-unpaid item" ||
-    descLower === "unpaid fee debicheck d/o";
-
-  if (isFeeFollowup) {
-    for (let j = i - 1; j >= 0 && j >= i - 6; j--) {
-      const candidate = lines[j];
-      if (
-        candidate &&
-        isStandardBankReferenceLine(candidate) &&
-        !isStandardBankReversalMarker(candidate)
-      ) {
-        return candidate;
-      }
-    }
-  }
-
-  return "";
-}
-
 function isStandardBankReversedTransaction(lines, i) {
   const next = lines[i + 1];
   const next2 = lines[i + 2];
 
-  if (next && isStandardBankReferenceLine(next) && next2 && isStandardBankReversalMarker(next2)) {
+  if (
+    next &&
+    isCompactStandardBankReferenceLine(next) &&
+    next2 &&
+    isStandardBankReversalMarker(next2)
+  ) {
     return true;
   }
 
@@ -211,32 +186,43 @@ function deriveStartingBalance(transactions) {
     return null;
   }
 
-  return Number((first.balance - first.amount).toFixed(2));
+  return round2(first.balance - first.amount);
 }
 
-function reconcileStandardBankTransactions(transactions) {
+function applyBalanceBasedSigns(transactions, openingBalance = null) {
   if (!Array.isArray(transactions) || transactions.length === 0) return [];
 
-  const reconciled = [];
+  let previousBalance =
+    typeof openingBalance === "number" && Number.isFinite(openingBalance)
+      ? round2(openingBalance)
+      : null;
 
-  // 🔥 Start from ZERO (NOT from OCR)
-  let runningBalance = 0;
+  return transactions.map((transaction) => {
+    const tx = { ...transaction };
 
-  for (let i = 0; i < transactions.length; i++) {
-    const tx = { ...transactions[i] };
+    if (
+      previousBalance !== null &&
+      typeof tx.amount === "number" &&
+      Number.isFinite(tx.amount) &&
+      typeof tx.balance === "number" &&
+      Number.isFinite(tx.balance)
+    ) {
+      const observedDelta = round2(tx.balance - previousBalance);
 
-    if (typeof tx.amount !== "number" || !Number.isFinite(tx.amount)) {
-      continue;
+      // A statement's running balance is stronger evidence of debit/credit
+      // direction than OCR column collapse. Only change the sign when the
+      // absolute transaction amount and observed balance movement agree.
+      if (Math.abs(Math.abs(observedDelta) - Math.abs(tx.amount)) <= 0.01) {
+        tx.amount = observedDelta;
+      }
     }
 
-    runningBalance = Number((runningBalance + tx.amount).toFixed(2));
+    if (typeof tx.balance === "number" && Number.isFinite(tx.balance)) {
+      previousBalance = round2(tx.balance);
+    }
 
-    tx.balance = runningBalance;
-
-    reconciled.push(tx);
-  }
-
-  return reconciled;
+    return tx;
+  });
 }
 
 function carryForwardDates(transactions) {
@@ -264,8 +250,12 @@ export function deriveStandardBankOpeningBalanceFromFirstTransaction(transaction
   return deriveStartingBalance(transactions);
 }
 
-export function extractStandardBankTransactions(text, statementPeriod = null) {
-  const lines = String(text)
+export function extractStandardBankTransactions(
+  text,
+  statementPeriod = null,
+  openingBalance = null
+) {
+  const lines = String(text || "")
     .split(/\r?\n/)
     .map((line) => normalizeWhitespace(line))
     .filter(Boolean);
@@ -273,25 +263,17 @@ export function extractStandardBankTransactions(text, statementPeriod = null) {
   const transactions = [];
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const moneyPair = extractStandardBankMoneyPair(line);
+    const moneyPair = extractStandardBankMoneyPair(lines[i]);
     if (!moneyPair) continue;
 
-    const description = getStandardBankDescription(lines, i);
-    const reference = getStandardBankReference(lines, i, description);
+    const { description, reference } = getStandardBankTransactionContext(lines, i);
 
-    if (shouldSkipStandardBankBlock(description, reference)) {
-      continue;
-    }
-
-    if (isStandardBankReversedTransaction(lines, i)) {
-      continue;
-    }
+    if (shouldSkipStandardBankBlock(description, reference)) continue;
+    if (isStandardBankReversedTransaction(lines, i)) continue;
 
     const mergedDescription = normalizeWhitespace(
       reference ? `${description} ${reference}` : description
     );
-
     const upper = mergedDescription.toUpperCase();
 
     if (upper.includes("RTD-NOT PROVIDED FOR")) continue;
@@ -309,23 +291,23 @@ export function extractStandardBankTransactions(text, statementPeriod = null) {
     }
 
     const date =
-      extractStandardBankDate(mergedDescription, statementPeriod) ||
       extractStandardBankDate(reference, statementPeriod) ||
       extractStandardBankDate(description, statementPeriod) ||
+      extractStandardBankDate(mergedDescription, statementPeriod) ||
       null;
 
     const tx = {
       date,
       description: mergedDescription,
-      amount: Number(moneyPair.amount.toFixed(2)),
-      balance: Number(moneyPair.balance.toFixed(2)),
+      amount: round2(moneyPair.amount),
+      balance: round2(moneyPair.balance),
     };
 
     if (shouldSkipStandardBankTransaction(tx)) continue;
-
     transactions.push(tx);
   }
 
-  const reconciled = reconcileStandardBankTransactions(transactions);
-  return carryForwardDates(reconciled);
+  return carryForwardDates(
+    applyBalanceBasedSigns(transactions, openingBalance)
+  );
 }
