@@ -18,6 +18,7 @@ import usageRoutes from "./routes/usage.routes.js";
 import { router as parseRoute } from "./routes/parse.js";
 import { PRICING } from "./config/pricing.js";
 import adminRoutes from "./routes/admin.js";
+import youscan2ReviewRoutes from "./youscan2/review/review.routes.js";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -84,6 +85,7 @@ app.use("/billing", ozowPaymentRoutes);
 app.use("/auth", authRoutes);
 app.use("/usage", usageRoutes);
 app.use("/parse", parseRoute);
+app.use("/api/v2/reviews", youscan2ReviewRoutes);
 
 app.get("/", (req, res) => res.send("YouScan Engine: Billing Active"));
 app.get("/pricing", (req, res) => res.json(PRICING));
