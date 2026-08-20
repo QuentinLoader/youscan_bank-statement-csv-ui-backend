@@ -67,7 +67,7 @@ export const checkPlanAccess = async (req, res, next) => {
     /* =========================================
        PLAN: MONTHLY_25 or PAYG_10
     ========================================= */
-    if (user.plan_code === "MONTHLY_25" || user.plan_code === "PAYG_10") {
+    if (user.plan_code === "PAYG_10") {
       if (currentCredits > 0) {
         req.userRecord = user;
         return next();
@@ -76,6 +76,32 @@ export const checkPlanAccess = async (req, res, next) => {
       return res.status(403).json({
         code: "CREDITS_EXHAUSTED",
         message: "You have no credits remaining. Please top up to continue.",
+        action: "REDIRECT_TO_PRICING"
+      });
+    }
+
+    if (user.plan_code === "MONTHLY_25") {
+      const isSubscriptionActive =
+        user.subscription_status === "active" &&
+        user.renewal_date &&
+        new Date(user.renewal_date) > now;
+
+      if (!isSubscriptionActive) {
+        return res.status(403).json({
+          code: "SUBSCRIPTION_EXPIRED",
+          message: "Your Monthly 25 subscription has expired. Please renew to continue.",
+          action: "REDIRECT_TO_PRICING"
+        });
+      }
+
+      if (currentCredits > 0) {
+        req.userRecord = user;
+        return next();
+      }
+
+      return res.status(403).json({
+        code: "CREDITS_EXHAUSTED",
+        message: "You have no credits remaining. Please upgrade to continue.",
         action: "REDIRECT_TO_PRICING"
       });
     }

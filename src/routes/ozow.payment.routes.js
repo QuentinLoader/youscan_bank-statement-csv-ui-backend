@@ -3,8 +3,22 @@ import pool from "../config/db.js";
 import { authenticateUser } from "../middleware/auth.middleware.js";
 import { PRICING } from "../config/pricing.js";
 import { generateOzowRequestHash } from "../utils/ozowSecurity.js";
+import { BillingStatusError, getBillingStatusForUser } from "../services/billingStatus.service.js";
 
 const router = express.Router();
+
+router.get("/status", authenticateUser, async (req, res) => {
+  try {
+    const status = await getBillingStatusForUser({ userId: req.user.userId });
+    return res.json(status);
+  } catch (err) {
+    if (err instanceof BillingStatusError) {
+      return res.status(err.status).json({ code: err.code, message: err.message });
+    }
+    console.error("BILLING STATUS ERROR:", err?.code || err?.message || "unknown");
+    return res.status(500).json({ code: "BILLING_STATUS_FAILED" });
+  }
+});
 
 function escapeHtmlAttribute(value) {
   return String(value ?? "")

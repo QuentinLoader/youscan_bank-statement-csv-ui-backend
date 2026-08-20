@@ -5,6 +5,8 @@ import crypto from "crypto";
 import pool from "../config/db.js";
 import { authenticateUser } from "../middleware/auth.middleware.js";
 import { sendVerificationEmail, sendPasswordResetEmail } from "../utils/email.js";
+import { isAdminEmail } from "../utils/adminAccess.js";
+import { AccountServiceError, changePasswordForUser, resendVerificationForUser } from "../services/account.service.js";
 
 const router = express.Router();
 
@@ -201,6 +203,48 @@ router.post("/verify-email", async (req, res) => {
 });
 
 /* ============================
+   RESEND VERIFICATION
+============================ */
+router.post("/resend-verification", authenticateUser, async (req, res) => {
+  try {
+    const result = await resendVerificationForUser({ userId: req.user.userId });
+    return res.json({
+      message: result.alreadyVerified
+        ? "Email is already verified."
+        : "Verification email sent.",
+      already_verified: result.alreadyVerified,
+    });
+  } catch (err) {
+    if (err instanceof AccountServiceError) {
+      return res.status(err.status).json({ code: err.code, message: err.message });
+    }
+    console.error("RESEND VERIFICATION ERROR", err?.code || err?.message || "unknown");
+    return res.status(500).json({ message: "Could not resend verification email" });
+  }
+});
+
+/* ============================
+   CHANGE PASSWORD
+============================ */
+router.post("/change-password", authenticateUser, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+    await changePasswordForUser({
+      userId: req.user.userId,
+      currentPassword,
+      newPassword,
+    });
+    return res.json({ message: "Password changed successfully" });
+  } catch (err) {
+    if (err instanceof AccountServiceError) {
+      return res.status(err.status).json({ code: err.code, message: err.message });
+    }
+    console.error("CHANGE PASSWORD ERROR", err?.code || err?.message || "unknown");
+    return res.status(500).json({ message: "Failed to change password" });
+  }
+});
+
+/* ============================
    LOGIN
 ============================ */
 router.post("/login", async (req, res) => {
@@ -244,7 +288,7 @@ router.post("/login", async (req, res) => {
 router.get("/me", authenticateUser, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT email,
+      `SELECT id, email,
               plan_code,
               credits_remaining,
               lifetime_parses_used,
@@ -273,6 +317,7 @@ router.get("/me", authenticateUser, async (req, res) => {
 
     res.json({
       ...user,
+      is_admin: isAdminEmail(user.email),
       low_credit_warning: lowCreditWarning
     });
 

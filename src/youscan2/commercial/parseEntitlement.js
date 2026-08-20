@@ -45,13 +45,32 @@ export function evaluateParseEntitlement(user, { now = new Date() } = {}) {
     return { planCode: "FREE", creditsDeducted: 1, mutation: "increment_lifetime" };
   }
 
-  if (user.plan_code === "PAYG_10" || user.plan_code === "MONTHLY_25") {
+  if (user.plan_code === "PAYG_10") {
     const credits = Number(user.credits_remaining || 0);
     if (credits <= 0) {
       throw new ParseEntitlementError(
         "CREDITS_EXHAUSTED",
         "No credits remaining.",
-        { suggestedPlan: user.plan_code === "PAYG_10" ? "MONTHLY_25" : "PRO_YEAR_UNLIMITED" }
+        { suggestedPlan: "MONTHLY_25" }
+      );
+    }
+    return { planCode: user.plan_code, creditsDeducted: 1, mutation: "decrement_credit" };
+  }
+
+  if (user.plan_code === "MONTHLY_25") {
+    if (user.subscription_status !== "active" || !nowIsBefore(user.renewal_date, now)) {
+      throw new ParseEntitlementError(
+        "SUBSCRIPTION_EXPIRED",
+        "Your Monthly 25 subscription has expired. Please renew to continue.",
+        { suggestedPlan: "MONTHLY_25" }
+      );
+    }
+    const credits = Number(user.credits_remaining || 0);
+    if (credits <= 0) {
+      throw new ParseEntitlementError(
+        "CREDITS_EXHAUSTED",
+        "No credits remaining.",
+        { suggestedPlan: "PRO_YEAR_UNLIMITED" }
       );
     }
     return { planCode: user.plan_code, creditsDeducted: 1, mutation: "decrement_credit" };

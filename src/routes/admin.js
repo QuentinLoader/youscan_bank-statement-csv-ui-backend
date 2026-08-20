@@ -1,14 +1,8 @@
 import express from "express";
 import pool from "../config/db.js";
 import { authenticateUser } from "../middleware/auth.middleware.js";
-
-function configuredAdminEmails(env = process.env) {
-  const configured = String(env.YOUSCAN_ADMIN_EMAILS || "quentin.loader@gmail.com")
-    .split(",")
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
-  return new Set(configured);
-}
+import { configuredAdminEmails } from "../utils/adminAccess.js";
+import { buildCutoverReadiness } from "../youscan2/cutover/readiness.js";
 
 async function loadV2Metrics(dbPool) {
   const tableCheck = await dbPool.query(
@@ -104,6 +98,25 @@ export function createAdminRouter({
     } catch (error) {
       console.error("Admin metrics error:", error?.code || error?.message || "unknown");
       return res.status(500).json({ error: "METRICS_FAILED" });
+    }
+  });
+
+  router.get("/cutover-readiness", authenticate, async (req, res) => {
+    try {
+      const meResult = await dbPool.query(
+        `SELECT email FROM users WHERE id = $1 LIMIT 1`,
+        [req.user.userId]
+      );
+      const myEmail = String(meResult.rows[0]?.email || "").toLowerCase();
+      if (!configuredAdminEmails(env).has(myEmail)) {
+        return res.status(403).json({ error: "FORBIDDEN" });
+      }
+
+      const readiness = await buildCutoverReadiness({ env, dbPool });
+      return res.status(readiness.ready ? 200 : 503).json(readiness);
+    } catch (error) {
+      console.error("Cutover readiness error:", error?.code || error?.message || "unknown");
+      return res.status(500).json({ error: "CUTOVER_READINESS_FAILED" });
     }
   });
 

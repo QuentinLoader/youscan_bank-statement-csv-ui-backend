@@ -23,12 +23,26 @@ test("Batch 17 FREE remains a 15-use lifetime parse entitlement", () => {
   );
 });
 
-test("Batch 17 PAYG_10 and MONTHLY_25 consume one successful parse credit", () => {
-  for (const plan_code of ["PAYG_10", "MONTHLY_25"]) {
-    const decision = evaluateParseEntitlement({ plan_code, credits_remaining: 1 });
-    assert.equal(decision.creditsDeducted, 1);
-    assert.equal(decision.mutation, "decrement_credit");
-  }
+test("Batch 19 PAYG_10 consumes one successful parse credit", () => {
+  const decision = evaluateParseEntitlement({ plan_code: "PAYG_10", credits_remaining: 1 });
+  assert.equal(decision.creditsDeducted, 1);
+  assert.equal(decision.mutation, "decrement_credit");
+});
+
+test("Batch 19 MONTHLY_25 consumes credits only while the subscription is active", () => {
+  const now = new Date("2026-08-20T00:00:00.000Z");
+  const active = evaluateParseEntitlement(
+    { plan_code: "MONTHLY_25", credits_remaining: 3, subscription_status: "active", renewal_date: "2026-09-20T00:00:00.000Z" },
+    { now }
+  );
+  assert.equal(active.creditsDeducted, 1);
+  assert.throws(
+    () => evaluateParseEntitlement(
+      { plan_code: "MONTHLY_25", credits_remaining: 3, subscription_status: "active", renewal_date: "2026-08-01T00:00:00.000Z" },
+      { now }
+    ),
+    (error) => error.code === "SUBSCRIPTION_EXPIRED"
+  );
 });
 
 test("Batch 17 PRO_YEAR_UNLIMITED remains unlimited only while active", () => {
