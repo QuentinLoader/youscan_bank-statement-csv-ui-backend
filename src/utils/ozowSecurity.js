@@ -53,6 +53,7 @@ export function generateOzowRequestHash(data, privateKey) {
 
 export function generateOzowWebhookHash(data, privateKey) {
   const key = requirePrivateKey(privateKey);
+
   const parts = [
     data.SiteCode,
     data.TransactionId,
@@ -66,14 +67,22 @@ export function generateOzowWebhookHash(data, privateKey) {
     data.Optional5 ?? "",
     data.CurrencyCode,
     data.IsTest,
+    data.StatusMessage ?? "",
     key,
   ];
 
   const raw = parts
-    .map((value) => (value === undefined || value === null ? "" : String(value)))
-    .join("");
+    .map((value) =>
+      value === undefined || value === null ? "" : String(value)
+    )
+    .join("")
+    .toLowerCase();
 
-  return crypto.createHash("sha512").update(raw, "utf8").digest("hex").toLowerCase();
+  return crypto
+    .createHash("sha512")
+    .update(raw, "utf8")
+    .digest("hex")
+    .toLowerCase();
 }
 
 export function timingSafeHashEqual(expected, received) {

@@ -49,6 +49,7 @@ function webhookPayload(overrides = {}) {
     Optional5: "",
     CurrencyCode: "ZAR",
     IsTest: "false",
+    StatusMessage: "Payment successful",
     BankReference: "YS-123456",
     BankName: "Synthetic Bank",
     ...overrides,
@@ -91,6 +92,31 @@ test("Batch 17 Ozow request hashing is deterministic and never exposes the priva
   assert.match(hash, /^[0-9a-f]{128}$/);
   assert.equal(hash.includes(privateKey), false);
   assert.equal(hash, generateOzowRequestHash(requestPayload(), privateKey));
+});
+
+test("Batch 20A Ozow webhook hash matches independent response vector", () => {
+  const payload = {
+    SiteCode: "SITE",
+    TransactionId: "OZ-1",
+    TransactionReference: "42_PAYG_10_123456",
+    Amount: "29.50",
+    Status: "Complete",
+    Optional1: "",
+    Optional2: "",
+    Optional3: "",
+    Optional4: "",
+    Optional5: "",
+    CurrencyCode: "ZAR",
+    IsTest: "false",
+    StatusMessage: "Payment successful",
+  };
+
+  const hash = generateOzowWebhookHash(payload, privateKey);
+
+  assert.equal(
+    hash,
+    "0544b3964f386e2514157d6f3eba61f2667632d65c23cb1d1882b0d536071a27e6d7c3b258af325932f13eda4b325ea685eee1edbc97c2dd00c55c880440f7d8"
+  );
 });
 
 test("Batch 17 Ozow hash comparison rejects malformed or changed hashes", () => {
