@@ -1,4 +1,4 @@
-/**
+﻿/**
  * YouScan V2
  * Bank statement validator.
  */
@@ -278,7 +278,23 @@ export async function validateBankStatement(normalized) {
       warningCount++;
     }
 
-    if (looksLikeDebit(description) && amount > 0) {
+    let amountConfirmedByBalance = false;
+
+    if (isNumber(balance)) {
+      if (i > 0 && isNumber(transactions[i - 1]?.balance)) {
+        amountConfirmedByBalance =
+          round2(balance - transactions[i - 1].balance) === round2(amount);
+      } else if (i === 0 && isNumber(openingBalance)) {
+        amountConfirmedByBalance =
+          round2(balance - openingBalance) === round2(amount);
+      }
+    }
+
+    if (
+      !amountConfirmedByBalance &&
+      looksLikeDebit(description) &&
+      amount > 0
+    ) {
       addIssue(issues, {
         severity: "warning",
         issueType: "possible_wrong_sign_debit",
@@ -289,7 +305,11 @@ export async function validateBankStatement(normalized) {
       warningCount++;
     }
 
-    if (looksLikeCredit(description) && amount < 0) {
+    if (
+      !amountConfirmedByBalance &&
+      looksLikeCredit(description) &&
+      amount < 0
+    ) {
       addIssue(issues, {
         severity: "warning",
         issueType: "possible_wrong_sign_credit",
@@ -299,7 +319,6 @@ export async function validateBankStatement(normalized) {
       });
       warningCount++;
     }
-
     if (i > 0) {
       const previous = transactions[i - 1];
       if (isNumber(previous?.balance) && isNumber(balance) && isNumber(amount)) {
@@ -391,3 +410,5 @@ export async function validateBankStatement(normalized) {
     score: round2(rawScore),
   };
 }
+
+

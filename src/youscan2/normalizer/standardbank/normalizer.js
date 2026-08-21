@@ -1,4 +1,4 @@
-/**
+﻿/**
  * YouScan V2
  * Standard Bank transaction normalizer.
  *
@@ -78,10 +78,7 @@ function shouldRemoveTransaction(description) {
   const upper = String(description || "").toUpperCase();
 
   return (
-    upper.includes("RTD-NOT PROVIDED FOR") ||
     upper === "##" ||
-    upper.includes("FEE-UNPAID ITEM") ||
-    upper.includes("UNPAID FEE DEBICHECK D/O") ||
     upper.includes("VAT SUMMARY") ||
     upper.includes("ACCOUNT SUMMARY") ||
     upper.includes("DETAILS OF AGREEMENT") ||
@@ -134,3 +131,4 @@ export function normalizeStandardBankTransactions(
 
   return normalized;
 }
+

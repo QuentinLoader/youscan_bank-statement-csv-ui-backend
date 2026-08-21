@@ -1,4 +1,4 @@
-import { normalizeWhitespace } from "../shared/utils.js";
+﻿import { normalizeWhitespace } from "../shared/utils.js";
 import {
   cleanStandardBankMoneyToken,
   parseStandardBankBalanceToken,
@@ -57,8 +57,8 @@ function isStandardBankHeaderOrNoise(line) {
     v === "fee" ||
     v === "debitscredits" ||
     v === "datebalance" ||
-    v === "balance brought forward" ||
-    v === "month-end balance" ||
+    v.startsWith("balance brought forward") ||
+    v.startsWith("month-end balance") ||
     v.startsWith("page ") ||
     v.startsWith("account number") ||
     v.startsWith("statement from") ||
@@ -102,6 +102,29 @@ function findPreviousDescription(lines, startIndex) {
   return "";
 }
 
+function findNextDescription(lines, startIndex) {
+  for (
+    let i = startIndex;
+    i < lines.length && i <= startIndex + 3;
+    i++
+  ) {
+    const candidate = lines[i];
+
+    if (!candidate) continue;
+
+    // Do not cross into the next monetary transaction row.
+    if (extractStandardBankMoneyPair(candidate)) break;
+
+    if (isStandardBankMarkerLine(candidate)) continue;
+    if (isStandardBankHeaderOrNoise(candidate)) continue;
+    if (isStandardBankReversalMarker(candidate)) continue;
+    if (isCompactStandardBankReferenceLine(candidate)) continue;
+
+    return candidate;
+  }
+
+  return "";
+}
 function getStandardBankTransactionContext(lines, moneyLineIndex) {
   const previous = lines[moneyLineIndex - 1] || "";
   let description = "";
@@ -125,6 +148,25 @@ function getStandardBankTransactionContext(lines, moneyLineIndex) {
     if (isCompactStandardBankReferenceLine(next)) {
       reference = next;
     }
+  }
+
+  const forwardDescription = findNextDescription(
+    lines,
+    moneyLineIndex + 1
+  );
+
+  const normalizedBackwardDescription =
+    normalizeWhitespace(description).toUpperCase();
+
+  const backwardLooksLikeStaleUnpaidMarker =
+    normalizedBackwardDescription === "FEE-UNPAID ITEM" ||
+    normalizedBackwardDescription === "UNPAID FEE DEBICHECK D/O";
+
+  if (
+    !description ||
+    (backwardLooksLikeStaleUnpaidMarker && forwardDescription)
+  ) {
+    description = forwardDescription || description;
   }
 
   return { description, reference };
@@ -262,52 +304,334 @@ export function extractStandardBankTransactions(
 
   const transactions = [];
 
-  for (let i = 0; i < lines.length; i++) {
-    const moneyPair = extractStandardBankMoneyPair(lines[i]);
-    if (!moneyPair) continue;
+  const monthNumbers = {
+    jan: 1,
+    january: 1,
+    feb: 2,
+    february: 2,
+    mar: 3,
+    march: 3,
+    apr: 4,
+    april: 4,
+    may: 5,
+    jun: 6,
+    june: 6,
+    jul: 7,
+    july: 7,
+    aug: 8,
+    august: 8,
+    sep: 9,
+    sept: 9,
+    september: 9,
+    oct: 10,
+    october: 10,
+    nov: 11,
+    november: 11,
+    dec: 12,
+    december: 12,
+  };
 
-    const { description, reference } = getStandardBankTransactionContext(lines, i);
+  function parsePeriodPoint(value) {
+    const source =
+      normalizeWhitespace(value || "");
 
-    if (shouldSkipStandardBankBlock(description, reference)) continue;
-    if (isStandardBankReversedTransaction(lines, i)) continue;
-
-    const mergedDescription = normalizeWhitespace(
-      reference ? `${description} ${reference}` : description
+    const match = source.match(
+      /\\b\\d{1,2}\\s+([A-Za-z]+)\\s+(\\d{4})\\b/
     );
-    const upper = mergedDescription.toUpperCase();
 
-    if (upper.includes("RTD-NOT PROVIDED FOR")) continue;
+    if (!match) return null;
+
+    const month =
+      monthNumbers[match[1].toLowerCase()];
+
+    const year =
+      Number(match[2]);
+
+    if (
+      !month ||
+      !Number.isInteger(year)
+    ) {
+      return null;
+    }
+
+    return {
+      month,
+      year,
+    };
+  }
+
+  const periodStart =
+    parsePeriodPoint(statementPeriod?.start);
+
+  const periodEnd =
+    parsePeriodPoint(statementPeriod?.end);
+
+  function resolveInlineDate(
+    monthValue,
+    dayValue
+  ) {
+    const month =
+      Number(monthValue);
+
+    const day =
+      Number(dayValue);
+
+    if (
+      !Number.isInteger(month) ||
+      !Number.isInteger(day) ||
+      month < 1 ||
+      month > 12 ||
+      day < 1 ||
+      day > 31
+    ) {
+      return null;
+    }
+
+    let year =
+      periodEnd?.year ??
+      periodStart?.year ??
+      null;
+
+    if (
+      periodStart &&
+      periodEnd &&
+      periodStart.year !== periodEnd.year
+    ) {
+      year =
+        month >= periodStart.month
+          ? periodStart.year
+          : periodEnd.year;
+    }
+
+    if (!year) return null;
+
+    const date =
+      new Date(
+        Date.UTC(
+          year,
+          month - 1,
+          day
+        )
+      );
+
+    if (
+      date.getUTCFullYear() !== year ||
+      date.getUTCMonth() !== month - 1 ||
+      date.getUTCDate() !== day
+    ) {
+      return null;
+    }
+
+    return (
+      String(day).padStart(2, "0") +
+      "/" +
+      String(month).padStart(2, "0") +
+      "/" +
+      year
+    );
+  }
+
+  /*
+   * Native Standard Bank layout:
+   *
+   * DESCRIPTION  AMOUNT  MM DD  BALANCE
+   *
+   * Both debits and credits are financial transactions.
+   * RTD-NOT PROVIDED FOR is therefore retained when it
+   * appears as its own monetary row.
+   */
+  const nativeRow =
+    /^(.+?)\s+([0-9][0-9 ,]*\.\d{2}-?)\s+(\d{1,2})\s+(\d{1,2})\s+([0-9][0-9 ,]*\.\d{2}-?)$/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const nativeMatch =
+      lines[i].match(nativeRow);
+
+    if (nativeMatch) {
+      const description =
+        normalizeWhitespace(nativeMatch[1]);
+
+      if (
+        isStandardBankHeaderOrNoise(description)
+      ) {
+        continue;
+      }
+
+      const next =
+        lines[i + 1] || "";
+
+      const reference =
+        isCompactStandardBankReferenceLine(next)
+          ? next
+          : "";
+
+      const mergedDescription =
+        normalizeWhitespace(
+          reference
+            ? `${description} ${reference}`
+            : description
+        );
+
+      const upper =
+        mergedDescription.toUpperCase();
+
+      if (
+        upper.includes("VAT SUMMARY") ||
+        upper.includes("ACCOUNT SUMMARY") ||
+        upper.includes("DETAILS OF AGREEMENT") ||
+        upper.includes(
+          "THIS DOCUMENT CONSTITUTES A CREDIT NOTE"
+        ) ||
+        upper.includes("TOTAL VAT")
+      ) {
+        continue;
+      }
+
+      const date =
+        resolveInlineDate(
+          nativeMatch[3],
+          nativeMatch[4]
+        ) ||
+        extractStandardBankDate(
+          reference,
+          statementPeriod
+        ) ||
+        null;
+
+      const nativeAmount =
+        cleanStandardBankMoneyToken(
+          nativeMatch[2]
+        );
+
+      const nativeBalance =
+        parseStandardBankBalanceToken(
+          nativeMatch[5]
+        );
+
+      if (
+        !Number.isFinite(nativeAmount) ||
+        !Number.isFinite(nativeBalance)
+      ) {
+        continue;
+      }
+
+      const tx = {
+        date,
+        description:
+          mergedDescription,
+        amount:
+          round2(nativeAmount),
+        balance:
+          round2(nativeBalance),
+      };
+
+      if (
+        shouldSkipStandardBankTransaction(tx)
+      ) {
+        continue;
+      }
+
+      transactions.push(tx);
+      continue;
+    }
+
+    /*
+     * Fallback for older/synthetic Standard Bank formats.
+     * Existing behaviour is retained here.
+     */
+    const moneyPair =
+      extractStandardBankMoneyPair(lines[i]);
+
+    if (!moneyPair) continue;
+    const {
+      description,
+      reference,
+    } =
+      getStandardBankTransactionContext(
+        lines,
+        i
+      );
+
+    if (
+      shouldSkipStandardBankBlock(
+        description,
+        reference
+      )
+    ) {
+      continue;
+    }
+
+    const mergedDescription =
+      normalizeWhitespace(
+        reference
+          ? `${description} ${reference}`
+          : description
+      );
+
+    const upper =
+      mergedDescription.toUpperCase();
+
+    if (
+      upper.includes(
+        "RTD-NOT PROVIDED FOR"
+      )
+    ) {
+      continue;
+    }
 
     if (
       upper.includes("VAT SUMMARY") ||
       upper.includes("ACCOUNT SUMMARY") ||
       upper.includes("DETAILS OF AGREEMENT") ||
-      upper.includes("THIS DOCUMENT CONSTITUTES A CREDIT NOTE") ||
-      upper.includes("TOTAL VAT") ||
-      upper === "FEE-UNPAID ITEM" ||
-      upper === "UNPAID FEE DEBICHECK D/O"
+      upper.includes(
+        "THIS DOCUMENT CONSTITUTES A CREDIT NOTE"
+      ) ||
+      upper.includes("TOTAL VAT")
     ) {
       continue;
     }
 
     const date =
-      extractStandardBankDate(reference, statementPeriod) ||
-      extractStandardBankDate(description, statementPeriod) ||
-      extractStandardBankDate(mergedDescription, statementPeriod) ||
+      extractStandardBankDate(
+        reference,
+        statementPeriod
+      ) ||
+      extractStandardBankDate(
+        description,
+        statementPeriod
+      ) ||
+      extractStandardBankDate(
+        mergedDescription,
+        statementPeriod
+      ) ||
       null;
 
     const tx = {
       date,
-      description: mergedDescription,
-      amount: round2(moneyPair.amount),
-      balance: round2(moneyPair.balance),
+      description:
+        mergedDescription,
+      amount:
+        round2(moneyPair.amount),
+      balance:
+        round2(moneyPair.balance),
     };
 
-    if (shouldSkipStandardBankTransaction(tx)) continue;
+    if (
+      shouldSkipStandardBankTransaction(tx)
+    ) {
+      continue;
+    }
+
     transactions.push(tx);
   }
 
   return carryForwardDates(
-    applyBalanceBasedSigns(transactions, openingBalance)
+    applyBalanceBasedSigns(
+      transactions,
+      openingBalance
+    )
   );
 }
+
+
+

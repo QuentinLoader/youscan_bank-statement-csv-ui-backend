@@ -1,4 +1,4 @@
-import test from "node:test";
+﻿import test from "node:test";
 import assert from "node:assert/strict";
 
 import { classifyDocument } from "../classifier/classifyDocument.js";
@@ -76,19 +76,6 @@ test("Batch 03 Standard Bank reconstructs a description with a preceding ROL ref
     "EFT PAYMENT SUPPLIER ABC ROL030726"
   );
   assert.equal(transactions[2].date, "03/07/2026");
-});
-
-test("Batch 03 Standard Bank excludes reversed transaction blocks", () => {
-  const transactions = extractStandardBankTransactions(
-    STANDARD_BANK_REVERSAL_FIXTURE_TEXT,
-    period,
-    1000
-  );
-
-  assert.equal(transactions.length, 1);
-  assert.equal(transactions[0].description, "Monthly Acc Fee 060726");
-  assert.equal(transactions[0].amount, -25);
-  assert.equal(transactions[0].balance, 975);
 });
 
 test("Batch 03 Standard Bank extraction returns authoritative metadata and observed balances", async () => {
@@ -201,4 +188,211 @@ test("Batch 03 Standard Bank runParseJob completes end-to-end with canonical dat
   assert.equal(result.result.data.bankName, "Standard Bank");
   assert.equal(result.result.data.transactions.length, 4);
   assert.deepEqual(result.result.data, STANDARD_BANK_EXPECTED_NORMALIZED);
+});
+
+test("Standard Bank supports money-first forward transaction context", () => {
+  const moneyFirstFixture = `
+The Standard Bank of South Africa Limited
+BANK STATEMENT / TAX INVOICE
+Account Number 1009 547 382 1
+Statement from 01 July 2026 to 31 July 2026
+BALANCE BROUGHT FORWARD 1,000.00
+100.00 900.00
+SBSA TEST 260701
+Card Purchase Example
+Month-end Balance R900.00
+`;
+
+  const transactions = extractStandardBankTransactions(
+    moneyFirstFixture,
+    period,
+    1000
+  );
+
+  assert.equal(transactions.length, 1);
+
+  assert.deepEqual(transactions[0], {
+    date: "01/07/2026",
+    description: "Card Purchase Example SBSA TEST 260701",
+    amount: -100,
+    balance: 900,
+  });
+});
+
+test("Standard Bank prefers forward context over stale unpaid-fee context", () => {
+  const moneyFirstFixture = `
+The Standard Bank of South Africa Limited
+BANK STATEMENT / TAX INVOICE
+Account Number 1009 547 382 1
+Statement from 01 July 2026 to 31 July 2026
+BALANCE BROUGHT FORWARD 1,000.00
+
+100.00 900.00
+FEE-UNPAID ITEM
+
+50.00 850.00
+SBSA TEST 260702
+Card Purchase Example
+
+Month-end Balance R850.00
+`;
+
+  const transactions = extractStandardBankTransactions(
+    moneyFirstFixture,
+    period,
+    1000
+  );
+
+  assert.equal(transactions.length, 2);
+
+  assert.equal(transactions[1].date, "02/07/2026");
+  assert.equal(
+    transactions[1].description,
+    "Card Purchase Example SBSA TEST 260702"
+  );
+  assert.equal(transactions[1].amount, -50);
+  assert.equal(transactions[1].balance, 850);
+});
+
+test("Standard Bank normalizer preserves extractor-approved unpaid-fee transactions", async () => {
+  const { normalizeStandardBankTransactions } = await import(
+    "../normalizer/standardBank/normalizer.js"
+  );
+
+  const extractedTransactions = [
+    {
+      date: "01/07/2026",
+      description: "FEE-UNPAID ITEM",
+      amount: -100,
+      balance: 900,
+    },
+    {
+      date: "02/07/2026",
+      description: "UNPAID FEE DEBICHECK D/O",
+      amount: -50,
+      balance: 850,
+    },
+  ];
+
+  const normalized = normalizeStandardBankTransactions(
+    extractedTransactions,
+    "31 July 2026"
+  );
+
+  assert.equal(normalized.length, 2);
+  assert.deepEqual(normalized, extractedTransactions);
+});
+
+test("Standard Bank preserves a legitimate leading thousands group in balances", async () => {
+  const { parseStandardBankBalanceToken } = await import(
+    "../extractor/shared/money.js"
+  );
+
+  assert.equal(
+    parseStandardBankBalanceToken("12 345 678.90"),
+    12345678.90
+  );
+});
+
+
+test("Standard Bank native rows preserve debit, RTD credit and unpaid fee", async () => {
+  const {
+    extractStandardBankTransactions,
+  } = await import(
+    "../extractor/standardBank/extractor.js"
+  );
+
+  const {
+    normalizeStandardBankTransactions,
+  } = await import(
+    "../normalizer/standardBank/normalizer.js"
+  );
+
+  const text = `
+BALANCE BROUGHT FORWARD 12 08 1,252.94-
+LOAN REPAYMENT 62.74- 12 12 1,315.68-
+SBSA LOAN 10133962812 251212
+RTD-NOT PROVIDED FOR 62.74 12 12 1,252.94-
+SBSA LOAN 10133962812 251212
+FEE-UNPAID ITEM ## 130.00- 12 12 1,382.94-
+`;
+
+  const extracted =
+    extractStandardBankTransactions(
+      text,
+      {
+        start:
+          "08 December 2025",
+        end:
+          "08 January 2026",
+      },
+      -1252.94
+    );
+
+  assert.equal(
+    extracted.length,
+    3
+  );
+
+  assert.deepEqual(
+    extracted.map(tx => ({
+      date: tx.date,
+      amount: tx.amount,
+      balance: tx.balance,
+    })),
+    [
+      {
+        date: "12/12/2025",
+        amount: -62.74,
+        balance: -1315.68,
+      },
+      {
+        date: "12/12/2025",
+        amount: 62.74,
+        balance: -1252.94,
+      },
+      {
+        date: "12/12/2025",
+        amount: -130,
+        balance: -1382.94,
+      },
+    ]
+  );
+
+  const normalized =
+    normalizeStandardBankTransactions(
+      extracted,
+      "08 January 2026"
+    );
+
+  assert.equal(
+    normalized.length,
+    3
+  );
+});
+
+
+test("Standard Bank uses statement-date closing balance ahead of month-end balance", async () => {
+  const {
+    extractStandardBankOpeningBalance,
+    extractStandardBankClosingBalance,
+  } = await import(
+    "../extractor/shared/metadata.js"
+  );
+
+  const text = `
+Month-end Balance R2,681.42-
+BALANCE BROUGHT FORWARD 12 08 1,252.94-
+Balance outstanding at date of statement 3,071.42-
+`;
+
+  assert.equal(
+    extractStandardBankOpeningBalance(text),
+    -1252.94
+  );
+
+  assert.equal(
+    extractStandardBankClosingBalance(text),
+    -3071.42
+  );
 });

@@ -1,4 +1,4 @@
-import { normalizeWhitespace } from "./utils.js";
+﻿import { normalizeWhitespace } from "./utils.js";
 import { parseSignedMoney, parseStandardBankBalanceToken } from "./money.js";
 
 function parseLooseMoney(value) {
@@ -186,16 +186,80 @@ export function extractStandardBankClientName(text) {
 }
 
 export function extractStandardBankOpeningBalance(text) {
-  const patterns = [
-    /BALANCE BROUGHT FORWARD[ \t:]*([0-9][0-9, ]*\.\d{2}-?)/i,
-    /opening balance[ \t:]*([0-9][0-9, ]*\.\d{2}-?)/i,
-  ];
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => normalizeWhitespace(line))
+    .filter(Boolean);
 
-  for (const pattern of patterns) {
-    const match = String(text || "").match(pattern);
-    if (match) {
-      const value = parseStandardBankBalanceToken(match[1]);
-      if (value !== null) return value;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (!/^BALANCE BROUGHT FORWARD\b/i.test(line)) {
+      continue;
+    }
+
+    /*
+     * Native Standard Bank examples:
+     *
+     * BALANCE BROUGHT FORWARD 12 08 1,252.94-
+     *
+     * or:
+     *
+     * BALANCE BROUGHT FORWARD
+     * 1,252.94-
+     *
+     * The MM DD fields are statement dates and must never
+     * become part of the monetary value.
+     */
+
+    const sameLineMatch = line.match(
+      /^BALANCE BROUGHT FORWARD\b(?:\s+\d{1,2}\s+\d{1,2})?\s+([0-9][0-9, ]*\.\d{2}-?)$/i
+    );
+
+    if (sameLineMatch) {
+      const value =
+        parseStandardBankBalanceToken(
+          sameLineMatch[1]
+        );
+
+      if (value !== null) {
+        return value;
+      }
+    }
+
+    const nextLine =
+      lines[i + 1] || "";
+
+    const nextLineMatch = nextLine.match(
+      /^(?:\d{1,2}\s+\d{1,2}\s+)?([0-9][0-9, ]*\.\d{2}-?)$/
+    );
+
+    if (nextLineMatch) {
+      const value =
+        parseStandardBankBalanceToken(
+          nextLineMatch[1]
+        );
+
+      if (value !== null) {
+        return value;
+      }
+    }
+  }
+
+  for (const line of lines) {
+    const match = line.match(
+      /^opening balance\b.*?([0-9][0-9, ]*\.\d{2}-?)$/i
+    );
+
+    if (!match) continue;
+
+    const value =
+      parseStandardBankBalanceToken(
+        match[1]
+      );
+
+    if (value !== null) {
+      return value;
     }
   }
 
@@ -203,19 +267,34 @@ export function extractStandardBankOpeningBalance(text) {
 }
 
 export function extractStandardBankClosingBalance(text) {
-  const patterns = [
-    /Month-end Balance[ \t]*R?[ \t]*([0-9][0-9, ]*\.\d{2}-?)/i,
-    /Balance outstanding at date of statement[ \t:]*([0-9][0-9, ]*\.\d{2}-?)/i,
-    /closing balance[ \t:]*([0-9][0-9, ]*\.\d{2}-?)/i,
-    /final balance[ \t:]*([0-9][0-9, ]*\.\d{2}-?)/i,
-    /current balance[ \t:]*([0-9][0-9, ]*\.\d{2}-?)/i,
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => normalizeWhitespace(line))
+    .filter(Boolean);
+
+  const priorities = [
+    /^Balance outstanding at date of statement\b/i,
+    /^closing balance\b/i,
+    /^final balance\b/i,
+    /^current balance\b/i,
+    /^Month-end Balance\b/i,
   ];
 
-  for (const pattern of patterns) {
-    const match = String(text || "").match(pattern);
-    if (match) {
-      const value = parseStandardBankBalanceToken(match[1]);
-      if (value !== null) return value;
+  for (const pattern of priorities) {
+    for (const line of lines) {
+      if (!pattern.test(line)) continue;
+
+      const tokens =
+        line.match(/(?:\d{1,3}(?:[ ,]\d{3})*|\d+)\.\d{2}-?/g) || [];
+
+      const value =
+        parseStandardBankBalanceToken(
+          tokens.at(-1) ?? null
+        );
+
+      if (value !== null) {
+        return value;
+      }
     }
   }
 
@@ -440,8 +519,8 @@ export function extractNedbankClientName(text) {
 export function extractNedbankStatementPeriod(text) {
   const source = String(text || "");
   const patterns = [
-    /Statement\s*period\s*:\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})\s*(?:to|[-–])\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/i,
-    /Period\s*:\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})\s*(?:to|[-–])\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/i,
+    /Statement\s*period\s*:\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})\s*(?:to|[-â€“])\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/i,
+    /Period\s*:\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})\s*(?:to|[-â€“])\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/i,
   ];
 
   for (const pattern of patterns) {
@@ -539,8 +618,8 @@ export function extractDiscoveryStatementPeriod(text) {
   const namedDate = "(\\d{1,2}\\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[A-Za-z]*\\s+\\d{4})";
   const numericDate = "(\\d{1,2}[\\/-]\\d{1,2}[\\/-]\\d{4})";
   const patterns = [
-    new RegExp(`Statement\\s*period\\s*:\\s*${namedDate}\\s*(?:to|[-–])\\s*${namedDate}`, "i"),
-    new RegExp(`Statement\\s*period\\s*:\\s*${numericDate}\\s*(?:to|[-–])\\s*${numericDate}`, "i"),
+    new RegExp(`Statement\\s*period\\s*:\\s*${namedDate}\\s*(?:to|[-â€“])\\s*${namedDate}`, "i"),
+    new RegExp(`Statement\\s*period\\s*:\\s*${numericDate}\\s*(?:to|[-â€“])\\s*${numericDate}`, "i"),
     new RegExp(`From\\s+${namedDate}\\s+to\\s+${namedDate}`, "i"),
     new RegExp(`From\\s+${numericDate}\\s+to\\s+${numericDate}`, "i"),
   ];
@@ -573,3 +652,4 @@ export function extractDiscoveryClosingBalance(text) {
 
   return match ? parseDiscoverySignedMoney(match[1], match[2]) : null;
 }
+

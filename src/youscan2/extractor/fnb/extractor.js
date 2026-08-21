@@ -1,4 +1,4 @@
-/**
+﻿/**
  * YouScan V2
  * FNB bank-statement transaction extractor.
  *
@@ -31,10 +31,10 @@ const MONTHS = Object.freeze({
   dec: 12,
 });
 
-const DATE_TOKEN = /\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/gi;
+const DATE_TOKEN = /\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/gi;
 const MONEY_TOKEN = "(?:\\d{1,3}(?:[ ,]\\d{3})+|\\d+)\\.\\d{2}";
 const MONEY_PAIR = new RegExp(
-  `(?:^|\\s)(${MONEY_TOKEN})\\s*(Cr|Dr)?\\s+(${MONEY_TOKEN})\\s*(Cr|Dr)?`,
+  `(?<!\\d)(${MONEY_TOKEN})\\s*(Cr|Dr)?\\s*(${MONEY_TOKEN})\\s*(Cr|Dr)?`,
   "i"
 );
 
@@ -117,6 +117,17 @@ function buildDate(dayText, monthText, period) {
   return formatDateParts(day, month, year);
 }
 
+function isFnbInformationalEntry(description = "") {
+  const lower = String(description || "").toLowerCase();
+
+  const informationalSignals = [
+    "schd trxn no av bal",
+    "balalert weekly",
+    "predet limit alert",
+  ];
+
+  return informationalSignals.some((signal) => lower.includes(signal));
+}
 function parseSegment(segment, dateMatch, period, previousBalance) {
   const afterDate = segment.slice(dateMatch[0].length).trim();
   const pair = afterDate.match(MONEY_PAIR);
@@ -180,9 +191,20 @@ export function extractFnbTransactions(
     const parsed = parseSegment(segment, current, period, previousBalance);
     if (!parsed) continue;
 
+    if (isFnbInformationalEntry(parsed.description)) {
+      continue;
+    }
+
     transactions.push(parsed);
     previousBalance = parsed.balance;
   }
 
   return transactions;
 }
+
+
+
+
+
+
+

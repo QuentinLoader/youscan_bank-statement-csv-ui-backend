@@ -1,10 +1,11 @@
-import test from "node:test";
+﻿import test from "node:test";
 import assert from "node:assert/strict";
 
 import { classifyDocument } from "../classifier/classifyDocument.js";
 import { extractAbsaTransactions } from "../extractor/absa/extractor.js";
 import { buildBankStatementExtraction } from "../extractor/index.js";
 import { buildBankStatementNormalization } from "../normalizer/index.js";
+import { normalizeAbsaTransactions } from "../normalizer/absa/normalizer.js";
 import { runParseJob } from "../orchestrator/runParseJob.js";
 import { validateBankStatement } from "../plugins/bankStatement/bankStatement.validator.js";
 import { validateBankStatementShape } from "../schemas/bankStatement.v1.js";
@@ -162,5 +163,57 @@ test("Batch 02 warning-producing bank results are marked needs_review", async ()
     result.result.issues.some(
       (issue) => issue.issueType === "closing_balance_mismatch"
     )
+  );
+});
+
+test("ABSA normalizer normalizes single-digit day and month to canonical DD/MM/YYYY", () => {
+  const normalized = normalizeAbsaTransactions([
+    {
+      date: "1/01/2026",
+      description: "TEST",
+      amount: -10,
+      balance: 100,
+    },
+    {
+      date: "2/1/2026",
+      description: "TEST",
+      amount: 10,
+      balance: 110,
+    },
+  ]);
+
+  assert.equal(normalized[0].date, "01/01/2026");
+  assert.equal(normalized[1].date, "02/01/2026");
+});
+
+test("ABSA balance reconciliation overrides debit-description heuristic", async () => {
+  const normalized = {
+    ...ABSA_EXPECTED_NORMALIZED,
+    closingBalance: 1200,
+    transactions: [
+      ...ABSA_EXPECTED_TRANSACTIONS.slice(0, 3),
+      {
+        date: "04/07/2026",
+        description: "Monthly Acc Fee",
+        amount: 50,
+        balance: 1200,
+      },
+    ],
+  };
+
+  const validation = await validateBankStatement(normalized);
+
+  assert.equal(
+    validation.issues.some(
+      (issue) => issue.issueType === "possible_wrong_sign_debit"
+    ),
+    false
+  );
+
+  assert.equal(
+    validation.issues.some(
+      (issue) => issue.issueType === "balance_continuity_mismatch"
+    ),
+    false
   );
 });

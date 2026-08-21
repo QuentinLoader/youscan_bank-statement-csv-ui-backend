@@ -1,4 +1,4 @@
-import { normalizeWhitespace } from "./utils.js";
+﻿import { normalizeWhitespace } from "./utils.js";
 
 export function parseMoney(value) {
   if (!value) return null;
@@ -53,8 +53,6 @@ export function cleanStandardBankMoneyToken(value) {
 export function normalizeStandardBankBalanceToken(value) {
   let token = normalizeWhitespace(value || "");
   if (!token) return "";
-
-  token = token.replace(/^\d{1,2}\s+/, "");
   token = token.replace(/\s+/g, "");
 
   return token;
@@ -95,10 +93,9 @@ export function parseStandardBankBalanceToken(value) {
 
   const direct = parseMoney(token);
   if (direct !== null) {
-    return repairSuspiciousStandardBankBalance(
-      negative ? -Math.abs(direct) : direct
-    );
+    return negative ? -Math.abs(direct) : direct;
   }
 
   return null;
 }
+
