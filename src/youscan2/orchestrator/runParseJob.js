@@ -23,6 +23,17 @@ function shouldRunShadowAi(shadowAiOptions) {
   return envFlagEnabled(process.env.YOUSCAN_V2_AI_EXTRACTION_ENABLED);
 }
 
+function sanitizeDiagnosticMessage(value) {
+  return String(value || "Unknown V2 parse failure")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(
+      /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,
+      "[redacted-email]"
+    )
+    .replace(/\b\d{6,}\b/g, "[redacted-number]")
+    .slice(0, 240);
+}
+
 export async function runParseJob({
   file,
   extractedText = "",
@@ -33,8 +44,10 @@ export async function runParseJob({
   const job = createParseJob({ file, extractionMeta });
   let classification = null;
   let schema = null;
+  let stage = "classification";
 
   try {
+    stage = "classification";
     classification = await classifyDocument({
       extractedText,
       fileName: file?.originalname || "unknown",
@@ -65,6 +78,7 @@ export async function runParseJob({
       });
     }
 
+    stage = "schema.resolve";
     schema = getActiveSchemaForDocumentType(classification.documentType);
 
     if (!schema) {
@@ -79,6 +93,7 @@ export async function runParseJob({
       });
     }
 
+    stage = "parser.resolve";
     const parser = getParserByKey(schema.parserKey);
 
     if (!parser) {
@@ -106,10 +121,16 @@ export async function runParseJob({
       schema,
     };
 
+    stage = "parser.extract";
     const raw = await parser.extract(context);
+
+    stage = "parser.normalize";
     const normalized = await parser.normalize(raw, context);
+
+    stage = "parser.validate";
     const validation = await parser.validate(normalized, context);
 
+    stage = "parser.toFinalResult";
     const finalResult = await parser.toFinalResult({
       jobId: job.jobId,
       classification,
@@ -124,6 +145,7 @@ export async function runParseJob({
           ? PARSE_JOB_STATUSES.NEEDS_REVIEW
           : PARSE_JOB_STATUSES.FAILED;
 
+    stage = "finalize";
     const finalEnvelope = finalizeParseJob({
       job,
       status,
@@ -142,6 +164,7 @@ export async function runParseJob({
       finalResult?.data &&
       shouldRunShadowAi(shadowAiOptions)
     ) {
+      stage = "shadow_ai";
       const shadowAi = await runAiBankStatementShadow({
         extractedText,
         sourceFileName: file?.originalname || null,
@@ -150,12 +173,14 @@ export async function runParseJob({
         ...(shadowAiOptions || {}),
       });
 
+      stage = "ai_decision";
       const aiDecision = evaluateAiDecisionPolicy({
         shadowAi,
         deterministicStatus: status,
         deterministicIssues: finalResult?.issues || [],
       });
 
+      stage = "ai_correction_proposal";
       const aiCorrectionProposal = createAiCorrectionProposal({
         shadowAi,
         aiDecision,
@@ -172,6 +197,20 @@ export async function runParseJob({
 
     return finalEnvelope;
   } catch (error) {
+    const errorCode = error?.code || "V2_PARSE_FAILED";
+    const errorMessage = error?.message || "Unknown V2 parse failure";
+
+    console.error(
+      "V2 PARSE JOB FAILURE:",
+      JSON.stringify({
+        stage,
+        code: errorCode,
+        name: error?.name || "Error",
+        subtype: classification?.documentSubtype || null,
+        message: sanitizeDiagnosticMessage(errorMessage),
+      })
+    );
+
     return finalizeParseJob({
       job,
       status: PARSE_JOB_STATUSES.FAILED,
@@ -181,8 +220,8 @@ export async function runParseJob({
       extractionMeta,
       message: "YouScan V2 parse job failed",
       error: {
-        code: error?.code || "V2_PARSE_FAILED",
-        message: error?.message || "Unknown V2 parse failure",
+        code: errorCode,
+        message: errorMessage,
       },
     });
   }
