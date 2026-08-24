@@ -31,7 +31,11 @@ async function loadV2Metrics(dbPool) {
     tableCheck.rows[0]?.review_cases_table
   );
 
-  const parseUsage = await dbPool.query(`
+  /*
+   * V2 commercial usage is recorded on the first successful
+   * CSV export of a document, not when the document is parsed.
+   */
+  const exportUsage = await dbPool.query(`
     WITH boundaries AS (
       SELECT
         now() - interval '14 days' AS last_14_start,
@@ -39,15 +43,15 @@ async function loadV2Metrics(dbPool) {
     )
     SELECT
       COUNT(*) FILTER (
-        WHERE action = 'parse_statement_v2'
+        WHERE action = 'export_csv_v2'
           AND created_at >= b.last_14_start
-      )::int AS v2_parse_requests_last_14_days,
+      )::int AS v2_exports_last_14_days,
 
       COUNT(*) FILTER (
-        WHERE action = 'parse_statement_v2'
+        WHERE action = 'export_csv_v2'
           AND created_at >= b.previous_14_start
           AND created_at < b.last_14_start
-      )::int AS v2_parse_requests_previous_14_days
+      )::int AS v2_exports_previous_14_days
 
     FROM usage_logs, boundaries b
   `);
@@ -88,10 +92,11 @@ async function loadV2Metrics(dbPool) {
   }
 
   return {
-    ...(parseUsage.rows[0] || {
-      v2_parse_requests_last_14_days: 0,
-      v2_parse_requests_previous_14_days: 0,
+    ...(exportUsage.rows[0] || {
+      v2_exports_last_14_days: 0,
+      v2_exports_previous_14_days: 0,
     }),
+
     ...reviewMetrics,
   };
 }

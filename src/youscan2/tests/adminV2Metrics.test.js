@@ -76,14 +76,14 @@ function fakePool({
 
       if (
         text.includes(
-          "parse_statement_v2"
+          "export_csv_v2"
         )
       ) {
         return {
           rows: [
             {
-              v2_parse_requests_last_14_days: 7,
-              v2_parse_requests_previous_14_days: 3,
+              v2_exports_last_14_days: 7,
+              v2_exports_previous_14_days: 3,
             },
           ],
         };
@@ -190,7 +190,7 @@ async function harness({
 }
 
 test(
-  "Batch 17 admin metrics retain commercial metrics and add V2 parse/review metrics",
+  "Admin metrics retain commercial metrics and report V2 export/review activity",
   async () => {
     const h =
       await harness();
@@ -220,8 +220,13 @@ test(
       );
 
       assert.equal(
-        body.v2_parse_requests_last_14_days,
+        body.v2_exports_last_14_days,
         7
+      );
+
+      assert.equal(
+        body.v2_exports_previous_14_days,
+        3
       );
 
       assert.equal(
@@ -240,7 +245,7 @@ test(
 );
 
 test(
-  "Batch 17 admin metrics tolerate a database where V2 review tables are not yet migrated",
+  "Admin metrics tolerate a database where V2 review tables are not yet migrated",
   async () => {
     const h =
       await harness({
@@ -260,6 +265,16 @@ test(
 
       const body =
         await response.json();
+
+      assert.equal(
+        body.v2_exports_last_14_days,
+        7
+      );
+
+      assert.equal(
+        body.v2_exports_previous_14_days,
+        3
+      );
 
       assert.equal(
         body.v2_review_cases_total,
