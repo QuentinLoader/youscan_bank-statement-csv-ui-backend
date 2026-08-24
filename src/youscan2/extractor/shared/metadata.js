@@ -800,49 +800,114 @@ export function extractDiscoveryAccountNumber(text) {
 }
 
 export function extractDiscoveryClientName(text) {
-  const source = String(text || "");
-  const explicitPatterns = [
+  const source =
+    String(text || "");
+
+  const patterns = [
     /^\s*Account Holder\s*:\s*([^\n]{3,120})\s*$/im,
     /^\s*Customer Name\s*:\s*([^\n]{3,120})\s*$/im,
+
+    /*
+     * Real Discovery statements print the
+     * account holder directly below the
+     * TAX INVOICE / statement heading.
+     *
+     * Example:
+     * Mr A Loader
+     */
+    /^\s*((?:Mr|Mrs|Ms|Miss|Dr|Prof)\.?\s+[A-Za-z][A-Za-z .'-]{1,100})\s*$/im,
   ];
 
-  for (const pattern of explicitPatterns) {
-    const match = source.match(pattern);
-    if (match) {
-      const candidate = normalizeWhitespace(match[1]);
-      if (candidate) return candidate;
+  for (
+    const pattern of patterns
+  ) {
+    const match =
+      source.match(
+        pattern
+      );
+
+    if (!match) {
+      continue;
+    }
+
+    const candidate =
+      normalizeWhitespace(
+        match[1]
+      );
+
+    if (candidate) {
+      return candidate;
     }
   }
 
-  const titled = source.match(
-    /^\s*((?:MR|MRS|MS|DR|PROF)\.?\s+[A-Z][A-Z .'-]{2,100})\s*$/im
-  );
-
-  return titled ? normalizeWhitespace(titled[1]) : null;
+  return null;
 }
 
 export function extractDiscoveryStatementPeriod(text) {
-  const source = String(text || "");
-  const namedDate = "(\\d{1,2}\\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[A-Za-z]*\\s+\\d{4})";
-  const numericDate = "(\\d{1,2}[\\/-]\\d{1,2}[\\/-]\\d{4})";
+  const source =
+    String(text || "");
+
+  const namedDate =
+    "(\\d{1,2}\\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[A-Za-z]*\\s+\\d{4})";
+
+  const numericDate =
+    "(\\d{1,2}[\\/-]\\d{1,2}[\\/-]\\d{4})";
+
   const patterns = [
-    new RegExp(`Statement\\s*period\\s*:\\s*${namedDate}\\s*(?:to|[-â€“])\\s*${namedDate}`, "i"),
-    new RegExp(`Statement\\s*period\\s*:\\s*${numericDate}\\s*(?:to|[-â€“])\\s*${numericDate}`, "i"),
-    new RegExp(`From\\s+${namedDate}\\s+to\\s+${namedDate}`, "i"),
-    new RegExp(`From\\s+${numericDate}\\s+to\\s+${numericDate}`, "i"),
+    /*
+     * Real Discovery:
+     * Statement period 05 Jan 2026 - 04 Feb 2026
+     *
+     * Colon is optional.
+     */
+    new RegExp(
+      `Statement\\s*period\\s*:?\\s*${namedDate}\\s*(?:to|[-–—])\\s*${namedDate}`,
+      "i"
+    ),
+
+    new RegExp(
+      `Statement\\s*period\\s*:?\\s*${numericDate}\\s*(?:to|[-–—])\\s*${numericDate}`,
+      "i"
+    ),
+
+    new RegExp(
+      `From\\s+${namedDate}\\s+to\\s+${namedDate}`,
+      "i"
+    ),
+
+    new RegExp(
+      `From\\s+${numericDate}\\s+to\\s+${numericDate}`,
+      "i"
+    ),
   ];
 
-  for (const pattern of patterns) {
-    const match = source.match(pattern);
+  for (
+    const pattern of patterns
+  ) {
+    const match =
+      source.match(
+        pattern
+      );
+
     if (match) {
       return {
-        start: normalizeWhitespace(match[1]),
-        end: normalizeWhitespace(match[2]),
+        start:
+          normalizeWhitespace(
+            match[1]
+          ),
+
+        end:
+          normalizeWhitespace(
+            match[2]
+          ),
       };
     }
   }
 
-  return { start: null, end: null };
+  return {
+    start: null,
+    end: null,
+  };
 }
 
 export function extractDiscoveryOpeningBalance(text) {
