@@ -563,10 +563,6 @@ function parseRow(
 
 /**
  * Extract Capitec transactions.
- *
- * Diagnostic output contains structural counts only.
- * It does not log statement text, names, account numbers,
- * descriptions or monetary values.
  */
 export function extractCapitecTransactions(
   text,
@@ -578,65 +574,7 @@ export function extractCapitecTransactions(
   const transactionBlock =
     isolateTransactionHistory(source);
 
-  const slashDateCount =
-    (
-      source.match(
-        /\b\d{1,2}\/\d{1,2}\/\d{4}\b/g
-      ) || []
-    ).length;
-
-  const dashDateCount =
-    (
-      source.match(
-        /\b\d{1,2}-\d{1,2}-\d{4}\b/g
-      ) || []
-    ).length;
-
-  const lineStartingDateCount =
-    source
-      .split(/\r?\n/)
-      .filter((line) =>
-        ROW_DATE.test(
-          line.trim()
-        )
-      ).length;
-
-  const transactionHistoryCount =
-    (
-      source.match(
-        /Transaction History/gi
-      ) || []
-    ).length;
-
-  const moneyLikeTokenCount =
-    (
-      source.match(
-        /R?\s*-?(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2}/g
-      ) || []
-    ).length;
-
   if (!transactionBlock) {
-    console.info(
-      "V2 CAPITEC STRUCTURE:",
-      JSON.stringify({
-        textLength:
-          source.length,
-        transactionHistoryCount,
-        transactionHistoryFound:
-          false,
-        transactionBlockLength:
-          0,
-        slashDateCount,
-        dashDateCount,
-        lineStartingDateCount,
-        moneyLikeTokenCount,
-        reconstructedRowCount:
-          0,
-        parsedTransactionCount:
-          0,
-      })
-    );
-
     return [];
   }
 
@@ -677,27 +615,6 @@ export function extractCapitecTransactions(
         tx.balance;
     }
   }
-
-  console.info(
-    "V2 CAPITEC STRUCTURE:",
-    JSON.stringify({
-      textLength:
-        source.length,
-      transactionHistoryCount,
-      transactionHistoryFound:
-        true,
-      transactionBlockLength:
-        transactionBlock.length,
-      slashDateCount,
-      dashDateCount,
-      lineStartingDateCount,
-      moneyLikeTokenCount,
-      reconstructedRowCount:
-        rows.length,
-      parsedTransactionCount:
-        transactions.length,
-    })
-  );
 
   return transactions;
 }
