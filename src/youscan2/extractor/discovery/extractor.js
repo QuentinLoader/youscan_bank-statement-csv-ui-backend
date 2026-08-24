@@ -28,13 +28,13 @@ const MONTHS = Object.freeze({
 });
 
 const DATE_AT_START =
-  /^\s*(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(20\d{2})\b/i;
+  /^\s*(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(20\d{2})(?!\d)/i;
 
 const INVERTED_DATE_AT_START =
-  /^\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(20\d{2})\s+(\d{1,2})\b/i;
+  /^\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(20\d{2})\s+(\d{1,2})(?!\d)/i;
 
 const DATE_ANY =
-  /\b\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+20\d{2}\b/gi;
+  /\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+20\d{2}(?!\d)/gi;
 
 const MONEY_TOKEN =
   /(?:^|\s)(-?\s*R\s*(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2}-?)(?:\s*(Cr|Dr))?(?=\s|$)/gi;
@@ -475,17 +475,36 @@ function reconstructTimelineRows(
   text = ""
 ) {
   /*
-   * pdf-parse can flatten several Discovery
-   * rows onto one physical text line.
+   * Production Discovery PDF extraction can remove the separator
+   * between one transaction amount and the following transaction date:
    *
-   * Split by every Discovery transaction
-   * date rather than relying on newlines.
+   *   R97.508 Jan 2026
+   *   R80.0012 Jan 2026
+   *   R150.0216 Jan 2026
+   *
+   * Without repairing that boundary first, the date scanner can
+   * incorrectly interpret:
+   *
+   *   R80.008 Jan 2026
+   *
+   * as:
+   *
+   *   08 Jan 2026
+   *
+   * by borrowing the final zero from R80.00.
+   *
+   * Insert a newline immediately after a complete .DD monetary
+   * decimal when a Discovery date follows directly.
    */
   const source =
     String(text || "")
       .replace(
         /\r/g,
         "\n"
+      )
+      .replace(
+        /(\.\d{2})(?=\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+20\d{2}(?!\d))/gi,
+        "$1\n"
       );
 
   const dateMatches = [
@@ -534,8 +553,8 @@ function reconstructTimelineRows(
     }
 
     /*
-     * A real financial row must expose at
-     * least one R-prefixed monetary value.
+     * A real transaction row must expose
+     * at least one R-prefixed monetary value.
      */
     if (
       extractMoneyTokens(
