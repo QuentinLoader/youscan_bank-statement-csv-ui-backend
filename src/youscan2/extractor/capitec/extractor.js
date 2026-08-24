@@ -26,7 +26,7 @@ const ROW_DATE =
   /^(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})(?=\s|[A-Za-z|¦│])/;
 
 const MONEY_TOKEN =
-  /(?:^|\s)(R?\s*-?(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2})\*?(?=\s|$)/gi;
+  /(?:^|[^\d.,])((?:R\s*)?-?(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2})\*?(?!\d)/gi;
 
 function round2(value) {
   return Math.round(value * 100) / 100;
