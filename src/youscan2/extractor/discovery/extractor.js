@@ -37,7 +37,7 @@ const DATE_ANY =
   /\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+20\d{2}(?!\d)/gi;
 
 const MONEY_TOKEN =
-  /(?:^|\s)(-?\s*R\s*(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2}-?)(?:\s*(Cr|Dr))?(?=\s|$)/gi;
+  /(-?\s*R\s*(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2}-?)(?:\s*(Cr|Dr))?/gi;
 
 function round2(value) {
   return Math.round(value * 100) / 100;

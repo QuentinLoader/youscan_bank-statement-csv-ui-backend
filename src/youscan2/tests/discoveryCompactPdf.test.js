@@ -14,6 +14,18 @@ Opening balance R12.98
 Closing balance R48.79
 `;
 
+const COMPACT_FINAL_REWARD = `
+Discovery Gold Transaction Account statement
+Transaction timeline
+Date Card no. Type Details Amount
+Opening balance R12.98
+4 Feb 2026Interest Interest Earned at 0.10%R0.04
+4 Feb 2026Fee Monthly Account fee -R15.00
+4 Feb 2026Fee Vitality Money Premium -R20.00
+4 Feb 2026Reward Dynamic interest boost at 0.08%R0.03
+Closing balance -R21.95
+`;
+
 test(
   "Discovery production compact PDF separates dates glued to amounts and descriptions",
   () => {
@@ -60,6 +72,44 @@ test(
     assert.equal(
       transactions.at(-1).balance,
       48.79
+    );
+  }
+);
+
+test(
+  "Discovery production compact PDF preserves final reward when R amount is glued to percentage text",
+  () => {
+    const transactions =
+      extractDiscoveryTransactions(
+        COMPACT_FINAL_REWARD,
+        12.98
+      );
+
+    assert.equal(
+      transactions.length,
+      4
+    );
+
+    assert.deepEqual(
+      transactions.map(
+        (tx) => tx.amount
+      ),
+      [
+        0.04,
+        -15,
+        -20,
+        0.03,
+      ]
+    );
+
+    assert.equal(
+      transactions.at(-1).description,
+      "Reward Dynamic interest boost at 0.08%"
+    );
+
+    assert.equal(
+      transactions.at(-1).balance,
+      -21.95
     );
   }
 );
