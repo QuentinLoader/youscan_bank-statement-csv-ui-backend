@@ -113,3 +113,54 @@ test(
     );
   }
 );
+test(
+  "Discovery preserves final reward when PDF emits its amount after closing balance",
+  () => {
+    const reordered = `
+Discovery Gold Transaction Account statement
+Transaction timeline
+Date Card no. Type Details Amount
+Opening balance R12.98
+4 Feb 2026 Interest Interest Earned at 0.10% R0.04
+4 Feb 2026 Fee Monthly Account fee - R15.00
+4 Feb 2026 Fee Vitality Money Premium - R20.00
+4 Feb 2026 Reward Dynamic interest boost at 0.08%
+Closing balance R71.73
+R0.03
+Total VAT 5.35 = fees charged (VAT incl.)
+`;
+
+    const transactions =
+      extractDiscoveryTransactions(
+        reordered,
+        12.98
+      );
+
+    assert.equal(
+      transactions.length,
+      4
+    );
+
+    assert.deepEqual(
+      transactions.map(
+        (tx) => tx.amount
+      ),
+      [
+        0.04,
+        -15,
+        -20,
+        0.03,
+      ]
+    );
+
+    assert.equal(
+      transactions.at(-1).description,
+      "Reward Dynamic interest boost at 0.08%"
+    );
+
+    assert.equal(
+      transactions.at(-1).balance,
+      -21.95
+    );
+  }
+);

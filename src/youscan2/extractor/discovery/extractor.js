@@ -423,10 +423,7 @@ function extractTransactionTimelineBlock(
 ) {
   const source =
     String(text || "")
-      .replace(
-        /\r/g,
-        ""
-      );
+      .replace(/\r/g, "");
 
   const startMatch =
     source.match(
@@ -448,27 +445,59 @@ function extractTransactionTimelineBlock(
     );
 
   /*
-   * We start searching only after
-   * "Transaction timeline", so this
-   * correctly finds the real timeline
-   * closing balance rather than the
-   * account-summary closing balance.
+   * IMPORTANT:
+   *
+   * Do NOT terminate the transaction block at "Closing balance".
+   *
+   * PDF text extraction can emit the final transaction description,
+   * then the Closing balance label/value, and only afterwards emit
+   * the transaction amount from another PDF text column.
+   *
+   * Example production ordering:
+   *
+   *   4 Feb 2026 Reward Dynamic interest boost at 0.08%
+   *   Closing balance R71.73
+   *   R0.03
+   *
+   * Cutting at Closing balance would permanently discard R0.03.
+   *
+   * Total VAT is the safe boundary after the transaction table.
    */
-  const closingMatch =
-    remainder.match(
-      /\bClosing\s+balance\b/i
-    );
+  const endPatterns = [
+    /\bTotal\s+VAT\b/i,
+    /\bYour\s+interest\s+rate\b/i,
+  ];
 
-  return (
-    closingMatch &&
-    typeof closingMatch.index ===
-      "number"
-      ? remainder.slice(
-          0,
-          closingMatch.index
-        )
-      : remainder
-  ).trim();
+  let end =
+    remainder.length;
+
+  for (
+    const pattern of endPatterns
+  ) {
+    const match =
+      remainder.match(
+        pattern
+      );
+
+    if (
+      match &&
+      typeof match.index ===
+        "number"
+    ) {
+      end =
+        Math.min(
+          end,
+          match.index
+        );
+    }
+  }
+
+  return remainder
+    .slice(
+      0,
+      end
+    )
+    .trim();
 }
 
 function reconstructTimelineRows(
@@ -881,12 +910,41 @@ function parseTimelineRow(
     return null;
   }
 
-  const body =
+  let body =
     String(row)
       .slice(
         dateMatch[0].length
       )
       .trim();
+
+  /*
+   * Because the timeline now deliberately extends beyond
+   * "Closing balance", the final transaction segment can contain:
+   *
+   *   Reward Dynamic interest boost at 0.08% R0.03
+   *   Closing balance R71.73
+   *
+   * or, depending on PDF object ordering:
+   *
+   *   Reward Dynamic interest boost at 0.08%
+   *   Closing balance R71.73
+   *   R0.03
+   *
+   * Remove the printed closing-balance field itself before
+   * determining the transaction amount.
+   *
+   * The actual transaction amount remains available in either form.
+   */
+  body =
+    body.replace(
+      /\bClosing\s+balance\s*(-?\s*R\s*(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2}-?)/gi,
+      " "
+    );
+
+  body =
+    normalizeWhitespace(
+      body
+    );
 
   const money =
     extractMoneyTokens(
@@ -900,12 +958,8 @@ function parseTimelineRow(
   }
 
   /*
-   * Real Discovery timeline:
-   *
-   * the LAST R-prefixed value before the
-   * next transaction date is the amount.
-   *
-   * It is NOT a running balance.
+   * Real Discovery transaction timeline:
+   * the final R-prefixed monetary value is the transaction amount.
    */
   const amountToken =
     money.at(-1);
@@ -925,10 +979,7 @@ function parseTimelineRow(
   }
 
   /*
-   * Declined R0.00 entries are
-   * informational. They do not represent
-   * account movement and should not create
-   * validator zero-amount warnings.
+   * Declined R0.00 transactions are informational only.
    */
   if (
     round2(amount) === 0
@@ -949,11 +1000,9 @@ function parseTimelineRow(
       : null;
 
   /*
-   * Truncate at the amount token.
-   *
-   * This removes page-footer/legal text
-   * that pdf-parse can append to the same
-   * physical line after a transaction.
+   * Keep only content through the selected transaction amount.
+   * This prevents any following footer material from entering
+   * the description.
    */
   const transactionBody =
     body.slice(
@@ -966,11 +1015,6 @@ function parseTimelineRow(
       transactionBody,
       [amountToken]
     )
-      /*
-       * One real PDF extraction includes
-       * an isolated lowercase "a" between
-       * the wrapped description and amount.
-       */
       .replace(
         /\s+\ba\b\s*$/,
         ""
