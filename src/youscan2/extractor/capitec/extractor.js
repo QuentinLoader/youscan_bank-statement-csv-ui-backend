@@ -58,9 +58,6 @@ function parseCapitecMoney(value) {
 /**
  * Headers that may occur at the beginning of the transaction
  * section or be repeated on subsequent pages.
- *
- * These are ignored without terminating the transaction-history
- * section itself.
  */
 function isRepeatedTableHeader(line = "") {
   const value = normalizeWhitespace(line);
@@ -298,7 +295,7 @@ function resolveMovement({
   const candidates = [];
 
   /*
-   * Normal amount + balance format.
+   * Standard amount + balance layout.
    */
   candidates.push({
     value: last.value,
@@ -319,7 +316,7 @@ function resolveMovement({
     });
 
     /*
-     * Keep preceding amount independently
+     * Keep the preceding monetary token independently
      * for legacy/ambiguous layouts.
      */
     candidates.push({
@@ -377,8 +374,8 @@ function resolveMovement({
   }
 
   /*
-   * Same absolute amount but ambiguous sign.
-   * The balance movement determines direction.
+   * Same absolute value but ambiguous/missing sign.
+   * Running balance determines debit/credit direction.
    */
   for (const candidate of candidates) {
     if (
@@ -396,9 +393,11 @@ function resolveMovement({
   }
 
   /*
-   * Genuine disagreement:
-   * preserve source candidate so validator
-   * can generate balance_continuity_mismatch.
+   * Genuine disagreement.
+   *
+   * Preserve the source candidate rather than silently
+   * rewriting it. The validator can then surface
+   * balance_continuity_mismatch / Review Required.
    */
   const preferred =
     secondLast
@@ -500,14 +499,90 @@ function parseRow(
   };
 }
 
+/**
+ * Extract Capitec transactions.
+ *
+ * The structure diagnostic deliberately logs only counts/lengths.
+ * It does NOT log customer names, account numbers, descriptions,
+ * monetary values or raw statement text.
+ */
 export function extractCapitecTransactions(
   text,
   openingBalance = null
 ) {
+  const source = String(text || "");
+
   const transactionBlock =
-    isolateTransactionHistory(text);
+    isolateTransactionHistory(source);
+
+  const slashDateCount =
+    (
+      source.match(
+        /\b\d{1,2}\/\d{1,2}\/\d{4}\b/g
+      ) || []
+    ).length;
+
+  const dashDateCount =
+    (
+      source.match(
+        /\b\d{1,2}-\d{1,2}-\d{4}\b/g
+      ) || []
+    ).length;
+
+  const lineStartingDateCount =
+    source
+      .split(/\r?\n/)
+      .filter((line) =>
+        ROW_DATE.test(
+          line.trim()
+        )
+      ).length;
+
+  const transactionHistoryCount =
+    (
+      source.match(
+        /Transaction History/gi
+      ) || []
+    ).length;
+
+  const moneyLikeTokenCount =
+    (
+      source.match(
+        /R?\s*-?(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2}/g
+      ) || []
+    ).length;
 
   if (!transactionBlock) {
+    console.info(
+      "V2 CAPITEC STRUCTURE:",
+      JSON.stringify({
+        textLength:
+          source.length,
+
+        transactionHistoryCount,
+
+        transactionHistoryFound:
+          false,
+
+        transactionBlockLength:
+          0,
+
+        slashDateCount,
+
+        dashDateCount,
+
+        lineStartingDateCount,
+
+        moneyLikeTokenCount,
+
+        reconstructedRowCount:
+          0,
+
+        parsedTransactionCount:
+          0,
+      })
+    );
+
     return [];
   }
 
@@ -548,6 +623,36 @@ export function extractCapitecTransactions(
         tx.balance;
     }
   }
+
+  console.info(
+    "V2 CAPITEC STRUCTURE:",
+    JSON.stringify({
+      textLength:
+        source.length,
+
+      transactionHistoryCount,
+
+      transactionHistoryFound:
+        true,
+
+      transactionBlockLength:
+        transactionBlock.length,
+
+      slashDateCount,
+
+      dashDateCount,
+
+      lineStartingDateCount,
+
+      moneyLikeTokenCount,
+
+      reconstructedRowCount:
+        rows.length,
+
+      parsedTransactionCount:
+        transactions.length,
+    })
+  );
 
   return transactions;
 }
