@@ -98,9 +98,7 @@ test(
           )
       );
 
-    assert.ok(
-      transaction
-    );
+    assert.ok(transaction);
 
     assert.match(
       transaction.description,
@@ -131,9 +129,7 @@ test(
           )
       );
 
-    assert.ok(
-      payment
-    );
+    assert.ok(payment);
 
     /*
      * Main payment: -35.00
@@ -275,6 +271,62 @@ Other Income 50.00 125.00
     assert.equal(
       transactions[1].balance,
       125
+    );
+  }
+);
+
+test(
+  "Capitec real PDF format accepts pipe-separated monetary columns",
+  () => {
+    const sample = `
+Transaction History
+
+Date Description Category Money In Money Out Fee* Balance
+
+01/03/2025|Live Better Interest Sweep|Transfer||-0.62||1 525.23
+01/03/2025|Online Purchase Example Merchant|Cellphone||-1 475.99||49.24
+13/03/2025|Immediate Capitec Pay Payment|Digital Payments||-35.00|-1.00|13.24
+`;
+
+    const transactions =
+      extractCapitecTransactions(
+        sample,
+        1525.85
+      );
+
+    assert.equal(
+      transactions.length,
+      3
+    );
+
+    assert.equal(
+      transactions[0].amount,
+      -0.62
+    );
+
+    assert.equal(
+      transactions[0].balance,
+      1525.23
+    );
+
+    assert.equal(
+      transactions[1].amount,
+      -1475.99
+    );
+
+    assert.equal(
+      transactions[1].balance,
+      49.24
+    );
+
+    assert.equal(
+      transactions[2].amount,
+      -36
+    );
+
+    assert.equal(
+      transactions[2].balance,
+      13.24
     );
   }
 );

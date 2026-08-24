@@ -189,7 +189,20 @@ function reconstructRows(text = "") {
 
 function extractMoneyTokens(body = "") {
   const matches = [];
-  const source = String(body || "");
+
+  /*
+   * Real PDF extraction can preserve Capitec table-column
+   * separators such as:
+   *
+   *   |   │   ¦
+   *
+   * Replace each separator with a single space. Because each
+   * replacement is one character long, token indexes still
+   * correspond to the original row and description slicing
+   * remains safe.
+   */
+  const source = String(body || "")
+    .replace(/[|¦│]/g, " ");
 
   MONEY_TOKEN.lastIndex = 0;
 
