@@ -690,23 +690,58 @@ export function extractNedbankClientName(text) {
 }
 
 export function extractNedbankStatementPeriod(text) {
-  const source = String(text || "");
+  const source =
+    String(text || "");
+
+  const date =
+    String.raw`\d{1,2}[\/-]\d{1,2}[\/-]\d{4}`;
+
+  /*
+   * Nedbank PDFs may expose the separator as:
+   *
+   * - hyphen
+   * - en dash
+   * - em dash
+   * - UTF-8 mojibake representing one of those characters
+   *
+   * Instead of depending on one particular encoded dash,
+   * allow a short non-numeric separator between the two dates.
+   */
   const patterns = [
-    /Statement\s*period\s*:\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})\s*(?:to|[-â€“])\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/i,
-    /Period\s*:\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})\s*(?:to|[-â€“])\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/i,
+    new RegExp(
+      `Statement\\s*period\\s*:\\s*(${date})\\s*(?:to|[^0-9\\r\\n]{1,12})\\s*(${date})`,
+      "i"
+    ),
+
+    new RegExp(
+      `Period\\s*:\\s*(${date})\\s*(?:to|[^0-9\\r\\n]{1,12})\\s*(${date})`,
+      "i"
+    ),
   ];
 
   for (const pattern of patterns) {
-    const match = source.match(pattern);
+    const match =
+      source.match(pattern);
+
     if (match) {
       return {
-        start: normalizeWhitespace(match[1]),
-        end: normalizeWhitespace(match[2]),
+        start:
+          normalizeWhitespace(
+            match[1]
+          ),
+
+        end:
+          normalizeWhitespace(
+            match[2]
+          ),
       };
     }
   }
 
-  return { start: null, end: null };
+  return {
+    start: null,
+    end: null,
+  };
 }
 
 export function extractNedbankOpeningBalance(text) {
