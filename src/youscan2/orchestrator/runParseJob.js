@@ -137,7 +137,55 @@ export async function runParseJob({
       normalized,
       validation,
     });
+if (finalResult?.status === PARSE_JOB_STATUSES.FAILED) {
+  const issueTypes = Array.isArray(finalResult?.issues)
+    ? [
+        ...new Set(
+          finalResult.issues
+            .map(
+              (issue) =>
+                issue?.issueType ||
+                issue?.code ||
+                "unknown"
+            )
+            .filter(Boolean)
+        ),
+      ].slice(0, 20)
+    : [];
 
+  console.error(
+    "V2 PARSE RESULT FAILED:",
+    JSON.stringify({
+      subtype:
+        classification?.documentSubtype ||
+        null,
+
+      rawTransactionCount:
+        Array.isArray(raw?.transactions)
+          ? raw.transactions.length
+          : null,
+
+      normalizedTransactionCount:
+        Array.isArray(
+          normalized?.transactions
+        )
+          ? normalized.transactions.length
+          : null,
+
+      finalTransactionCount:
+        Array.isArray(
+          finalResult?.data?.transactions
+        )
+          ? finalResult.data.transactions.length
+          : null,
+
+      validationStatus:
+        validation?.status || null,
+
+      issueTypes,
+    })
+  );
+}
     const status =
       finalResult.status === PARSE_JOB_STATUSES.COMPLETED
         ? PARSE_JOB_STATUSES.COMPLETED
