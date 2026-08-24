@@ -5,38 +5,79 @@
  * Supports:
  * - existing deterministic Nedbank fixtures
  * - real Nedbank Current Account statements
- * - optional transaction-list number before the date
+ * - line-oriented native PDF extraction
+ * - flattened PDF extraction
+ * - fused amount/balance values such as 0.19343.08
  *
  * Real format:
  *
  * Tran list no | Date | Description | Fees (R) | Debits (R) |
  * Credits (R) | Balance (R)
  *
- * Running balances are preserved and used to resolve debit/credit
- * direction where the printed amount is ambiguous.
+ * The printed running balance is preserved and used to determine
+ * debit/credit direction where the printed amount is ambiguous.
  */
 
 import { normalizeDateToken } from "../shared/dates.js";
 import { parseMoney } from "../shared/money.js";
 import { normalizeWhitespace } from "../shared/utils.js";
 
-const ROW_START =
-  /^(?:(\d{3,12})\s+)?(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})\b/;
+const DATE_TOKEN =
+  String.raw`\d{1,2}[\/-]\d{1,2}[\/-]\d{4}`;
 
+const DATE_GLOBAL =
+  new RegExp(DATE_TOKEN, "g");
+
+const ROW_START =
+  new RegExp(
+    `^(?:(\\d{3,12})\\s*)?(${DATE_TOKEN})`
+  );
+
+/**
+ * Important:
+ *
+ * Nedbank transaction rows use comma thousands separators:
+ *
+ *   11,369.18
+ *
+ * Do NOT allow spaces as thousands separators here.
+ *
+ * Allowing spaces caused references such as:
+ *
+ *   INV-7781 250.00
+ *
+ * to be misread as:
+ *
+ *   781 250.00
+ *
+ * Also deliberately require exactly two decimal digits, which lets
+ * fused PDF text such as:
+ *
+ *   0.19343.08
+ *
+ * become two tokens:
+ *
+ *   0.19
+ *   343.08
+ */
 const MONEY_TOKEN =
-  /(?:^|\s)(R?\s*-?(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2})(?:\s*(Cr|Dr))?(?=\s|\*|$)/gi;
+  /((?:R\s*)?-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})(?:\s*(Cr|Dr))?/gi;
 
 function round2(value) {
   return Math.round(value * 100) / 100;
 }
 
-function parseNedbankMoney(value, marker = "") {
+function parseNedbankMoney(
+  value,
+  marker = ""
+) {
   if (!value) {
     return null;
   }
 
   const raw = String(value)
     .replace(/^R\s*/i, "")
+    .replace(/,/g, "")
     .replace(/\s+/g, "")
     .trim();
 
@@ -72,23 +113,26 @@ function parseNedbankMoney(value, marker = "") {
 }
 
 /**
- * Real Nedbank statements contain several monetary summaries
- * before the transaction table.
+ * Locate the actual transaction table.
  *
- * If the formal transaction-table header exists, isolate only
- * that table.
+ * Nedbank PDF extraction may retain normal spaces:
  *
- * Older regression fixtures do not include that exact header,
- * so fall back to whole-text row reconstruction.
+ *   Tran list no Date Description Fees (R) ...
+ *
+ * or flatten them:
+ *
+ *   Tran list noDateDescriptionFees (R)Debits (R)...
  */
-function isolateTransactionTable(text = "") {
+function isolateTransactionTable(
+  text = ""
+) {
   const source =
     String(text || "");
 
   const headerPatterns = [
-    /Tran\s+list\s+no\s+Date\s+Description\s+Fees\s*\(R\)\s+Debits\s*\(R\)\s+Credits\s*\(R\)\s+Balance\s*\(R\)/i,
+    /Tran\s*list\s*no\s*Date\s*Description\s*Fees\s*\(R\)\s*Debits\s*\(R\)\s*Credits\s*\(R\)\s*Balance\s*\(R\)/i,
 
-    /Tran\s+list\s+no\s+Date\s+Description\b[^\r\n]*\bBalance\s*\(R\)/i,
+    /Tran\s*list\s*no\s*Date\s*Description[\s\S]{0,160}?Balance\s*\(R\)/i,
   ];
 
   for (const pattern of headerPatterns) {
@@ -108,9 +152,18 @@ function isolateTransactionTable(text = "") {
         match[0].length
       );
 
+    /*
+     * Handle both:
+     *
+     *   Closing balance 591.29
+     *
+     * and:
+     *
+     *   Closing balance591.29
+     */
     const closingMatch =
       block.match(
-        /^\s*Closing\s+balance\b/im
+        /Closing\s*balance/i
       );
 
     if (
@@ -124,16 +177,25 @@ function isolateTransactionTable(text = "") {
         );
     }
 
-    return block.trim();
+    return {
+      text: block.trim(),
+      isolated: true,
+    };
   }
 
   /*
-   * Backward compatibility for Batch 06 fixtures.
+   * Original deterministic fixtures do not necessarily contain
+   * the formal table heading. Preserve their old line-oriented path.
    */
-  return source;
+  return {
+    text: source,
+    isolated: false,
+  };
 }
 
-function isNoiseLine(line = "") {
+function isNoiseLine(
+  line = ""
+) {
   const value =
     normalizeWhitespace(line);
 
@@ -146,18 +208,20 @@ function isNoiseLine(line = "") {
     /^see money differently$/i.test(value) ||
     /^We subscribe to the Code of Banking Practice/i.test(value) ||
     /^Nedbank Ltd Reg No/i.test(value) ||
-    /^Bank charges for the period\b/i.test(value) ||
-    /^Narrative Description\b/i.test(value) ||
-    /^Electronic banking fees\b/i.test(value) ||
-    /^Transaction service fees\b/i.test(value) ||
-    /^Other charges\b/i.test(value) ||
-    /^Total Charges\b/i.test(value) ||
-    /^Date\s+(?:Description|Details|Transaction)\b/i.test(value) ||
-    /^Tran\s+list\s+no\s+Date\s+Description\b/i.test(value)
+    /^Bank charges for the period/i.test(value) ||
+    /^Narrative Description/i.test(value) ||
+    /^Electronic banking fees/i.test(value) ||
+    /^Transaction service fees/i.test(value) ||
+    /^Other charges/i.test(value) ||
+    /^Total Charges/i.test(value) ||
+    /^Date\s*(?:Description|Details|Transaction)/i.test(value) ||
+    /^Tran\s*list\s*no\s*Date\s*Description/i.test(value)
   );
 }
 
-function isBoundaryLine(line = "") {
+function isBoundaryLine(
+  line = ""
+) {
   const value =
     normalizeWhitespace(line);
 
@@ -166,15 +230,23 @@ function isBoundaryLine(line = "") {
   }
 
   return (
-    /^Closing\s+balance\b/i.test(value) ||
-    /^Statement Summary\b/i.test(value) ||
-    /^Summary of\b/i.test(value) ||
-    /^Fees Summary\b/i.test(value) ||
-    /^Important Information\b/i.test(value)
+    /^Closing\s*balance/i.test(value) ||
+    /^Statement Summary/i.test(value) ||
+    /^Summary of/i.test(value) ||
+    /^Fees Summary/i.test(value) ||
+    /^Important Information/i.test(value)
   );
 }
 
-function reconstructRows(text = "") {
+/**
+ * Original line-oriented reconstruction.
+ *
+ * Used for the existing deterministic Batch 06 fixtures so that
+ * the real-PDF hardening does not change their behaviour.
+ */
+function reconstructLegacyRows(
+  text = ""
+) {
   const lines =
     String(text || "")
       .split(/\r?\n/)
@@ -229,7 +301,101 @@ function reconstructRows(text = "") {
   return rows;
 }
 
-function extractMoneyTokens(body = "") {
+/**
+ * Flattened PDF reconstruction.
+ *
+ * Once the real transaction table has been isolated, every complete
+ * DD/MM/YYYY token represents a transaction-row boundary.
+ *
+ * Description fragments such as:
+ *
+ *   VAT 28/05-25/06
+ *
+ * do not contain a four-digit year and therefore cannot create
+ * false transaction rows.
+ *
+ * This also handles:
+ *
+ *   343.2726/06/2025INTEREST...
+ *
+ * because we slice directly at the start of 26/06/2025 instead of
+ * trying to insert whitespace into the preceding balance.
+ */
+function reconstructFlattenedRows(
+  text = ""
+) {
+  const source =
+    String(text || "");
+
+  DATE_GLOBAL.lastIndex = 0;
+
+  const dates = [];
+  let match;
+
+  while (
+    (match =
+      DATE_GLOBAL.exec(source)) !== null
+  ) {
+    dates.push({
+      index: match.index,
+      date: match[0],
+    });
+  }
+
+  if (dates.length === 0) {
+    return [];
+  }
+
+  const rows = [];
+
+  for (
+    let i = 0;
+    i < dates.length;
+    i += 1
+  ) {
+    const start =
+      dates[i].index;
+
+    const end =
+      i + 1 < dates.length
+        ? dates[i + 1].index
+        : source.length;
+
+    const row =
+      normalizeWhitespace(
+        source.slice(
+          start,
+          end
+        )
+      );
+
+    if (row) {
+      rows.push(row);
+    }
+  }
+
+  return rows;
+}
+
+function reconstructRows(
+  text,
+  isolated
+) {
+  return isolated
+    ? reconstructFlattenedRows(text)
+    : reconstructLegacyRows(text);
+}
+
+/**
+ * Extract decimal monetary values without interpreting integer
+ * references as money.
+ *
+ * Exact match offsets are retained so the selected monetary columns
+ * can later be removed from the transaction description.
+ */
+function extractMoneyTokens(
+  body = ""
+) {
   const source =
     String(body || "")
       .replace(/[|¦│]/g, " ");
@@ -260,32 +426,12 @@ function extractMoneyTokens(body = "") {
       continue;
     }
 
-    const rawOffset =
-      match[0].lastIndexOf(
-        raw
-      );
-
-    const index =
-      match.index +
-      Math.max(
-        0,
-        rawOffset
-      );
-
-    /*
-     * Include the complete matched token,
-     * including an optional Cr/Dr marker.
-     */
-    const end =
-      match.index +
-      match[0].length;
-
     matches.push({
       raw,
       marker,
       value,
-      index,
-      end,
+      index: match.index,
+      end: MONEY_TOKEN.lastIndex,
     });
   }
 
@@ -294,14 +440,18 @@ function extractMoneyTokens(body = "") {
 
 function stripSelectedMoney(
   body,
-  moneyTokens
+  selectedTokens
 ) {
   let description =
     String(body || "")
       .replace(/[|¦│]/g, " ");
 
+  /*
+   * Remove right-to-left so removing a later value does not change
+   * the offsets of an earlier value.
+   */
   for (
-    const token of [...moneyTokens]
+    const token of [...selectedTokens]
       .sort(
         (a, b) =>
           b.index - a.index
@@ -317,13 +467,6 @@ function stripSelectedMoney(
       );
   }
 
-  /*
-   * Some legacy Nedbank layouts can still leave a balance
-   * direction marker behind after monetary-token removal.
-   *
-   * Remove Cr/Dr only when it occurs at the END of the
-   * reconstructed description.
-   */
   description =
     description.replace(
       /(?:\s+\b(?:Cr|Dr)\b)+\s*$/i,
@@ -339,13 +482,16 @@ function stripSelectedMoney(
 }
 
 /**
- * Reconciliation safety:
+ * Running-balance safety.
  *
- * - if candidate magnitude agrees with balance movement,
- *   balance movement decides the sign
- * - if no amount is printed, derive it from balance movement
- * - if printed amount and balance genuinely disagree, preserve
- *   the printed amount so validation can route to review
+ * If the observed running-balance delta agrees with the printed
+ * amount magnitude, the delta determines the sign.
+ *
+ * If the amount is absent, derive it from the balance movement.
+ *
+ * If the printed amount genuinely disagrees with the running balance,
+ * preserve the printed amount so validation can route the statement
+ * to Review Required rather than silently altering the bank data.
  */
 function resolveAmount(
   candidate,
@@ -419,15 +565,29 @@ function parseRow(
       .trim();
 
   const money =
-    extractMoneyTokens(body);
+    extractMoneyTokens(
+      body
+    );
 
   if (money.length === 0) {
     return null;
   }
 
+  /*
+   * The final decimal value is Nedbank's printed running balance.
+   */
   const balanceToken =
     money.at(-1);
 
+  /*
+   * The immediately preceding decimal value represents whichever
+   * populated monetary column applies to this transaction:
+   *
+   * fee / debit / credit.
+   *
+   * Earlier decimal numbers can legitimately belong to the
+   * description, e.g. VAT ... = R41.73.
+   */
   const amountToken =
     money.length >= 2
       ? money.at(-2)
@@ -461,7 +621,7 @@ function parseRow(
     );
 
   if (
-    /\bopening\s+balance\b/i.test(
+    /\bopening\s*balance/i.test(
       description
     )
   ) {
@@ -469,7 +629,7 @@ function parseRow(
   }
 
   if (
-    /\bclosing\s+balance\b/i.test(
+    /\bclosing\s*balance/i.test(
       description
     )
   ) {
@@ -491,7 +651,8 @@ function parseRow(
   }
 
   /*
-   * Informational R0.00 rows are not financial movements.
+   * Informational zero-movement rows such as Nedbank's VAT line
+   * are not financial transactions.
    */
   if (round2(amount) === 0) {
     return null;
@@ -516,14 +677,15 @@ export function extractNedbankTransactions(
   text,
   openingBalance = null
 ) {
-  const transactionBlock =
+  const table =
     isolateTransactionTable(
       text
     );
 
   const rows =
     reconstructRows(
-      transactionBlock
+      table.text,
+      table.isolated
     );
 
   const transactions = [];
@@ -538,16 +700,23 @@ export function extractNedbankTransactions(
 
   for (const row of rows) {
     /*
-     * Explicit opening-balance rows establish state,
-     * but are not transactions.
+     * Explicit opening-balance row establishes state but is not
+     * itself a financial transaction.
+     *
+     * No trailing word boundary is used because flattened text can
+     * appear as:
+     *
+     *   Opening balance343.27
      */
     if (
-      /\bopening\s+balance\b/i.test(
+      /\bopening\s*balance/i.test(
         row
       )
     ) {
       const money =
-        extractMoneyTokens(row);
+        extractMoneyTokens(
+          row
+        );
 
       const observedBalance =
         money.at(-1)?.value;
@@ -576,8 +745,8 @@ export function extractNedbankTransactions(
 
     if (!tx) {
       /*
-       * A zero-movement informational row may still expose
-       * the current running balance for the following row.
+       * Zero-movement informational rows can still expose the
+       * running balance required for the following transaction.
        */
       const rowMatch =
         String(row).match(
