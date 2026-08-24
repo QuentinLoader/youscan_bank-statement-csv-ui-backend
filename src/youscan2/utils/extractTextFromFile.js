@@ -58,7 +58,10 @@ export function hasUsefulPdfText(value) {
     text.match(/[A-Za-z0-9]/g) || []
   ).length;
 
-  return alphaNumericCount >= MIN_USEFUL_ALPHANUMERIC_CHARS;
+  return (
+    alphaNumericCount >=
+    MIN_USEFUL_ALPHANUMERIC_CHARS
+  );
 }
 
 function getResponseOutputText(response) {
@@ -91,6 +94,56 @@ function getResponseOutputText(response) {
   }
 
   return parts.join("\n").trim();
+}
+
+async function requestPdfVision({
+  baseUrl,
+  apiKey,
+  model,
+  safeFileName,
+  fileData,
+  fetchImpl,
+}) {
+  const requestBody = {
+    model,
+    store: false,
+
+    input: [
+      {
+        role: "user",
+
+        content: [
+          {
+  type: "input_file",
+  filename: safeFileName,
+  file_data: fileData,
+  detail: "high",
+},
+
+          {
+            type: "input_text",
+            text: PDF_VISION_PROMPT,
+          },
+        ],
+      },
+    ],
+  };
+
+  return fetchImpl(
+    `${baseUrl}/responses`,
+    {
+      method: "POST",
+
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+
+      body: JSON.stringify(
+        requestBody
+      ),
+    }
+  );
 }
 
 async function recoverPdfTextWithVision({
@@ -130,18 +183,18 @@ async function recoverPdfTextWithVision({
   }
 
   /*
-   * Keep PDF transcription separate from the main YouScan AI model.
+   * Dedicated model for scanned-PDF transcription.
    *
-   * Railway can override this with:
-   * YOUSCAN_V2_PDF_VISION_MODEL
-   *
-   * If no dedicated model is configured, retain compatibility with the
-   * existing YOUSCAN_V2_AI_MODEL setting.
+   * If not configured, use the primary V2 AI model.
    */
-  const model = String(
+  const primaryModel = String(
+    env.YOUSCAN_V2_AI_MODEL ||
+      "gpt-5.6"
+  ).trim();
+
+  const preferredVisionModel = String(
     env.YOUSCAN_V2_PDF_VISION_MODEL ||
-      env.YOUSCAN_V2_AI_MODEL ||
-      "gpt-5-mini"
+      primaryModel
   ).trim();
 
   const baseUrl = String(
@@ -152,74 +205,97 @@ async function recoverPdfTextWithVision({
     .replace(/\/+$/, "");
 
   const safeFileName =
-    String(fileName || "statement.pdf")
-      .replace(/[\r\n\t]/g, " ")
-      .slice(0, 200) ||
+    String(
+      fileName ||
+        "statement.pdf"
+    )
+      .replace(
+        /[\r\n\t]/g,
+        " "
+      )
+      .slice(
+        0,
+        200
+      ) ||
     "statement.pdf";
 
   const fileData =
-    `data:application/pdf;base64,${buffer.toString("base64")}`;
+    `data:application/pdf;base64,${buffer.toString(
+      "base64"
+    )}`;
 
-  /*
-   * Exact timing starts immediately before the external vision request is
-   * prepared. This lets production logs show the real scanned-PDF latency
-   * instead of estimating it from Railway container timestamps.
-   */
-  const visionStartedAt = Date.now();
+  const visionStartedAt =
+    Date.now();
 
-  const requestBody = {
-    model,
-
-    store: false,
-
-    /*
-     * PDF transcription is a narrow extraction task, not a reasoning task.
-     * For GPT-5 models, request minimal reasoning to reduce unnecessary
-     * latency.
-     */
-    ...(model.toLowerCase().startsWith("gpt-5")
-      ? {
-          reasoning: {
-            effort: "minimal",
-          },
-        }
-      : {}),
-
-    input: [
-      {
-        role: "user",
-
-        content: [
-          {
-            type: "input_file",
-            filename: safeFileName,
-            file_data: fileData,
-            detail: "high",
-          },
-
-          {
-            type: "input_text",
-            text: PDF_VISION_PROMPT,
-          },
-        ],
-      },
-    ],
-  };
+  let selectedModel =
+    preferredVisionModel;
 
   try {
-    const response = await fetchImpl(
-      `${baseUrl}/responses`,
-      {
-        method: "POST",
+    let response =
+      await requestPdfVision({
+        baseUrl,
+        apiKey,
 
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
+        model:
+          selectedModel,
 
-        body: JSON.stringify(requestBody),
-      }
-    );
+        safeFileName,
+        fileData,
+        fetchImpl,
+      });
+
+    /*
+     * A dedicated vision model must never break a path that already worked
+     * with the primary YouScan AI model.
+     *
+     * If the dedicated model rejects the PDF request, retry once with the
+     * proven primary model.
+     */
+    const canRetryWithPrimary =
+      selectedModel !==
+        primaryModel &&
+      (
+        response?.status ===
+          400 ||
+        response?.status ===
+          404
+      );
+
+    if (
+      !response?.ok &&
+      canRetryWithPrimary
+    ) {
+      console.warn(
+        "V2 PDF vision model rejected request; retrying with primary model",
+        {
+          status:
+            response?.status ||
+            null,
+
+          visionModel:
+            selectedModel,
+
+          fallbackModel:
+            primaryModel,
+        }
+      );
+
+      selectedModel =
+        primaryModel;
+
+      response =
+        await requestPdfVision({
+          baseUrl,
+          apiKey,
+
+          model:
+            selectedModel,
+
+          safeFileName,
+          fileData,
+          fetchImpl,
+        });
+    }
 
     if (!response?.ok) {
       console.warn(
@@ -230,25 +306,36 @@ async function recoverPdfTextWithVision({
       return null;
     }
 
-    const payload = await response.json();
+    const payload =
+      await response.json();
 
     if (
       payload?.status &&
-      payload.status !== "completed"
+      payload.status !==
+        "completed"
     ) {
       console.warn(
         "V2 PDF vision fallback incomplete:",
-        String(payload.status)
+        String(
+          payload.status
+        )
       );
 
       return null;
     }
 
-    const recovered = normalizeText(
-      getResponseOutputText(payload)
-    );
+    const recovered =
+      normalizeText(
+        getResponseOutputText(
+          payload
+        )
+      );
 
-    if (!hasUsefulPdfText(recovered)) {
+    if (
+      !hasUsefulPdfText(
+        recovered
+      )
+    ) {
       console.warn(
         "V2 PDF vision fallback returned insufficient text"
       );
@@ -257,17 +344,29 @@ async function recoverPdfTextWithVision({
     }
 
     return {
-      text: recovered,
-      durationMs: Date.now() - visionStartedAt,
-      model,
+      text:
+        recovered,
+
+      durationMs:
+        Date.now() -
+        visionStartedAt,
+
+      model:
+        selectedModel,
+
+      preferredModel:
+        preferredVisionModel,
+
+      usedPrimaryFallback:
+        selectedModel !==
+        preferredVisionModel,
     };
   } catch (error) {
     /*
      * Fail safely.
      *
-     * If the external fallback is unavailable, the existing classifier will
-     * still receive the native extraction and handle the document according
-     * to the normal V2 rules.
+     * Do not expose provider responses, document contents,
+     * prompts, account details or statement data in logs.
      */
     console.warn(
       "V2 PDF vision fallback error:",
@@ -284,126 +383,249 @@ export async function extractTextFromFile(
   file,
   {
     pdfParseImpl = pdfParse,
-    fetchImpl = globalThis.fetch,
-    env = process.env,
+    fetchImpl =
+      globalThis.fetch,
+    env =
+      process.env,
   } = {}
 ) {
-  if (!file || !file.buffer) {
-    throw new Error("NO_FILE_BUFFER");
+  if (
+    !file ||
+    !file.buffer
+  ) {
+    throw new Error(
+      "NO_FILE_BUFFER"
+    );
   }
 
-  const fileName = file.originalname || "";
-  const mimeType = file.mimetype || "";
+  const fileName =
+    file.originalname ||
+    "";
+
+  const mimeType =
+    file.mimetype ||
+    "";
 
   const isPdf =
-    mimeType === "application/pdf" ||
-    fileName.toLowerCase().endsWith(".pdf");
+    mimeType ===
+      "application/pdf" ||
+    fileName
+      .toLowerCase()
+      .endsWith(
+        ".pdf"
+      );
 
   const isText =
-    mimeType.startsWith("text/") ||
-    fileName.toLowerCase().endsWith(".txt");
+    mimeType.startsWith(
+      "text/"
+    ) ||
+    fileName
+      .toLowerCase()
+      .endsWith(
+        ".txt"
+      );
 
   if (isPdf) {
-    const result = await pdfParseImpl(file.buffer);
+    const result =
+      await pdfParseImpl(
+        file.buffer
+      );
 
-    const nativeText = normalizeText(
-      result.text
-    );
+    const nativeText =
+      normalizeText(
+        result.text
+      );
 
     /*
-     * Normal digitally-generated PDFs:
-     * existing fast deterministic path remains unchanged.
+     * Normal digitally-generated PDF.
+     *
+     * This remains the preferred and fastest path.
+     * No OpenAI request is made.
      */
-    if (hasUsefulPdfText(nativeText)) {
+    if (
+      hasUsefulPdfText(
+        nativeText
+      )
+    ) {
       return {
-        text: nativeText,
+        text:
+          nativeText,
 
         meta: {
-          sourceType: "pdf",
-          pages: result.numpages || null,
-          info: result.info || null,
-          textSource: "native",
-          visionFallbackUsed: false,
+          sourceType:
+            "pdf",
+
+          pages:
+            result.numpages ||
+            null,
+
+          info:
+            result.info ||
+            null,
+
+          textSource:
+            "native",
+
+          visionFallbackUsed:
+            false,
         },
       };
     }
 
     /*
-     * Scanned/image-only PDF:
-     * use vision transcription only when explicitly enabled.
+     * Scanned/image-only PDF.
+     *
+     * Vision is attempted only when explicitly enabled.
      */
-    const recovery = await recoverPdfTextWithVision({
-      buffer: file.buffer,
-      fileName,
-      env,
-      fetchImpl,
-    });
+    const recovery =
+      await recoverPdfTextWithVision({
+        buffer:
+          file.buffer,
 
-    if (recovery?.text) {
+        fileName,
+
+        env,
+
+        fetchImpl,
+      });
+
+    if (
+      recovery?.text
+    ) {
       console.log(
         "V2 PDF vision fallback used",
         {
-          pages: result.numpages || null,
-          nativeTextLength: nativeText.length,
-          recoveredTextLength: recovery.text.length,
-          durationMs: recovery.durationMs,
-          model: recovery.model,
+          pages:
+            result.numpages ||
+            null,
+
+          nativeTextLength:
+            nativeText.length,
+
+          recoveredTextLength:
+            recovery.text.length,
+
+          durationMs:
+            recovery.durationMs,
+
+          model:
+            recovery.model,
+
+          preferredModel:
+            recovery.preferredModel,
+
+          usedPrimaryFallback:
+            recovery.usedPrimaryFallback,
         }
       );
 
       return {
-        text: recovery.text,
+        text:
+          recovery.text,
 
         meta: {
-          sourceType: "pdf",
-          pages: result.numpages || null,
-          info: result.info || null,
-          textSource: "openai_pdf_vision",
-          visionFallbackUsed: true,
-          nativeTextLength: nativeText.length,
-          visionDurationMs: recovery.durationMs,
-          visionModel: recovery.model,
+          sourceType:
+            "pdf",
+
+          pages:
+            result.numpages ||
+            null,
+
+          info:
+            result.info ||
+            null,
+
+          textSource:
+            "openai_pdf_vision",
+
+          visionFallbackUsed:
+            true,
+
+          nativeTextLength:
+            nativeText.length,
+
+          visionDurationMs:
+            recovery.durationMs,
+
+          visionModel:
+            recovery.model,
+
+          preferredVisionModel:
+            recovery.preferredModel,
+
+          visionPrimaryFallbackUsed:
+            recovery.usedPrimaryFallback,
         },
       };
     }
 
     /*
-     * Preserve existing behaviour when the fallback is disabled or
-     * unavailable.
+     * Preserve existing behaviour if external recovery is disabled
+     * or unavailable.
      */
     return {
-      text: nativeText,
+      text:
+        nativeText,
 
       meta: {
-        sourceType: "pdf",
-        pages: result.numpages || null,
-        info: result.info || null,
-        textSource: "native",
-        visionFallbackUsed: false,
-        nativeTextInsufficient: true,
+        sourceType:
+          "pdf",
+
+        pages:
+          result.numpages ||
+          null,
+
+        info:
+          result.info ||
+          null,
+
+        textSource:
+          "native",
+
+        visionFallbackUsed:
+          false,
+
+        nativeTextInsufficient:
+          true,
       },
     };
   }
 
   if (isText) {
     return {
-      text: file.buffer.toString("utf8"),
+      text:
+        file.buffer.toString(
+          "utf8"
+        ),
 
       meta: {
-        sourceType: "text",
-        pages: 1,
-        info: null,
+        sourceType:
+          "text",
+
+        pages:
+          1,
+
+        info:
+          null,
       },
     };
   }
 
   return {
-    text: file.buffer.toString("utf8"),
+    text:
+      file.buffer.toString(
+        "utf8"
+      ),
 
     meta: {
-      sourceType: "unknown",
-      pages: null,
-      info: null,
+      sourceType:
+        "unknown",
+
+      pages:
+        null,
+
+      info:
+        null,
     },
   };
 }
