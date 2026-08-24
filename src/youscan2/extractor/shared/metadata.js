@@ -445,20 +445,193 @@ export function extractCapitecStatementPeriod(text) {
   };
 }
 
-export function extractCapitecOpeningBalance(text) {
-  const match = String(text || "").match(
-    /Opening Balance\s*:\s*R?\s*(-?(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2})/i
-  );
+/**
+ * Real Capitec PDFs can extract page-one columns in visual order rather
+ * than label/value order.
+ *
+ * Example:
+ *
+ *   R503.87       <- available
+ *   R533.87       <- closing
+ *   R1 525.85     <- opening
+ *   1862555255    <- account
+ *   Main Account Statement
+ *
+ * while the labels later appear as:
+ *
+ *   From Date: ... Opening Balance:
+ *   To Date: ... Closing Balance:
+ *
+ * The final two standalone money values immediately preceding the
+ * account number are therefore authoritative opening/closing metadata.
+ */
+function extractCapitecDetachedBalances(text) {
+  const source = String(text || "")
+    .replace(/\u00a0/g, " ");
 
-  return match ? parseCapitecSignedMoney(match[1]) : null;
+  const statementIndex =
+    source.search(
+      /\bMain Account Statement\b/i
+    );
+
+  if (statementIndex < 0) {
+    return {
+      opening: null,
+      closing: null,
+    };
+  }
+
+  const beforeStatement =
+    source.slice(
+      0,
+      statementIndex
+    );
+
+  const lines =
+    beforeStatement
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+  let accountIndex = -1;
+
+  /*
+   * Find the account-number line nearest the
+   * Main Account Statement heading.
+   */
+  for (
+    let i = lines.length - 1;
+    i >= 0;
+    i--
+  ) {
+    const digits =
+      lines[i].replace(
+        /\D/g,
+        ""
+      );
+
+    if (
+      /^[0-9\s]+$/.test(lines[i]) &&
+      digits.length >= 9 &&
+      digits.length <= 12
+    ) {
+      accountIndex = i;
+      break;
+    }
+  }
+
+  if (accountIndex < 0) {
+    return {
+      opening: null,
+      closing: null,
+    };
+  }
+
+  const values = [];
+
+  /*
+   * Walk backwards through the contiguous
+   * standalone money values preceding the
+   * account number.
+   *
+   * First value encountered = opening balance.
+   * Second value encountered = closing balance.
+   */
+  for (
+    let i = accountIndex - 1;
+    i >= 0;
+    i--
+  ) {
+    const line = lines[i];
+
+    const moneyMatch =
+      line.match(
+        /^(-?\s*R\s*(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2})$/i
+      );
+
+    if (!moneyMatch) {
+      if (values.length > 0) {
+        break;
+      }
+
+      continue;
+    }
+
+    const value =
+      parseCapitecSignedMoney(
+        moneyMatch[1]
+      );
+
+    if (
+      typeof value === "number" &&
+      Number.isFinite(value)
+    ) {
+      values.push(value);
+    }
+
+    if (values.length >= 2) {
+      break;
+    }
+  }
+
+  return {
+    opening:
+      values[0] ?? null,
+
+    closing:
+      values[1] ?? null,
+  };
+}
+
+export function extractCapitecOpeningBalance(text) {
+  const source =
+    String(text || "");
+
+  /*
+   * Preserve the existing labelled format
+   * used by deterministic fixtures and any
+   * Capitec text extraction that keeps the
+   * value beside the label.
+   */
+  const labelled =
+    source.match(
+      /Opening Balance\s*:\s*R?\s*(-?(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2})/i
+    );
+
+  if (labelled) {
+    return parseCapitecSignedMoney(
+      labelled[1]
+    );
+  }
+
+  /*
+   * Real PDF fallback: Capitec's page-one
+   * visual column extraction places the
+   * balance value before the account/title.
+   */
+  return extractCapitecDetachedBalances(
+    source
+  ).opening;
 }
 
 export function extractCapitecClosingBalance(text) {
-  const match = String(text || "").match(
-    /Closing Balance\s*:\s*R?\s*(-?(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2})/i
-  );
+  const source =
+    String(text || "");
 
-  return match ? parseCapitecSignedMoney(match[1]) : null;
+  const labelled =
+    source.match(
+      /Closing Balance\s*:\s*R?\s*(-?(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2})/i
+    );
+
+  if (labelled) {
+    return parseCapitecSignedMoney(
+      labelled[1]
+    );
+  }
+
+  return extractCapitecDetachedBalances(
+    source
+  ).closing;
 }
 
 
