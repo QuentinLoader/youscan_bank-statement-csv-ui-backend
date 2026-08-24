@@ -297,3 +297,90 @@ test(
     );
   }
 );
+test(
+  "vision fallback exposes exhausted AI quota as a temporary service condition",
+  async () => {
+    let calls = 0;
+
+    await assert.rejects(
+      () =>
+        extractTextFromFile(
+          pdfFile(),
+          {
+            pdfParseImpl:
+              async () => ({
+                text: "",
+                numpages: 2,
+                info: null,
+              }),
+
+            fetchImpl:
+              async () => {
+                calls += 1;
+
+                return {
+                  ok: false,
+                  status: 429,
+
+                  headers: {
+                    get() {
+                      return null;
+                    },
+                  },
+
+                  async json() {
+                    return {
+                      error: {
+                        type:
+                          "insufficient_quota",
+
+                        code:
+                          "credit_balance_exhausted",
+                      },
+                    };
+                  },
+                };
+              },
+
+            env: {
+              YOUSCAN_V2_PDF_VISION_FALLBACK_ENABLED:
+                "true",
+
+              OPENAI_API_KEY:
+                "synthetic-key",
+
+              YOUSCAN_V2_AI_MODEL:
+                "gpt-5.6",
+
+              YOUSCAN_V2_PDF_VISION_MAX_ATTEMPTS:
+                "3",
+            },
+          }
+        ),
+
+      (error) => {
+        assert.equal(
+          error.code,
+          "V2_AI_QUOTA_EXHAUSTED"
+        );
+
+        assert.equal(
+          error.status,
+          503
+        );
+
+        return true;
+      }
+    );
+
+    /*
+     * Exhausted credit must never be
+     * retried because waiting cannot fix
+     * the condition.
+     */
+    assert.equal(
+      calls,
+      1
+    );
+  }
+);

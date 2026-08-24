@@ -88,9 +88,7 @@ function sleep(ms) {
   );
 }
 
-function parseRetryAfterMs(
-  response
-) {
+function parseRetryAfterMs(response) {
   const header =
     response?.headers?.get?.(
       "retry-after"
@@ -153,10 +151,9 @@ async function readSafeRateLimitInfo(
 
   try {
     /*
-     * This response is already an error
-     * response, so consuming its body is
-     * safe. We retain only non-sensitive
-     * error classification fields.
+     * This is already an error response.
+     * Retain only non-sensitive provider
+     * classification fields.
      */
     const payload =
       await response.json();
@@ -199,12 +196,35 @@ function isPermanentQuotaError(
         ""
     ).toLowerCase();
 
+  const permanentValues =
+    new Set([
+      "insufficient_quota",
+      "credit_balance_exhausted",
+      "billing_hard_limit_reached",
+    ]);
+
   return (
-    type ===
-      "insufficient_quota" ||
-    code ===
-      "insufficient_quota"
+    permanentValues.has(
+      type
+    ) ||
+    permanentValues.has(
+      code
+    )
   );
+}
+
+function createVisionServiceError(
+  code
+) {
+  const error =
+    new Error(
+      "AI-assisted scanning is temporarily unavailable."
+    );
+
+  error.code = code;
+  error.status = 503;
+
+  return error;
 }
 
 export function hasUsefulPdfText(
@@ -318,8 +338,8 @@ async function requestPdfVision({
               fileData,
 
             /*
-             * Keep the previously tested
-             * production request shape.
+             * Preserve the production-tested
+             * scanned-PDF request shape.
              */
             detail:
               "high",
@@ -390,11 +410,8 @@ async function requestPdfVisionWithRetry({
       });
 
     /*
-     * Success, or an error other than
-     * rate limiting:
-     *
-     * return immediately and preserve
-     * existing behaviour.
+     * Success or a non-429 error:
+     * return immediately.
      */
     if (
       response?.ok ||
@@ -403,8 +420,10 @@ async function requestPdfVisionWithRetry({
     ) {
       return {
         response,
+
         rateLimitRetries:
           totalRetries,
+
         finalRateLimitInfo:
           null,
       };
@@ -416,8 +435,8 @@ async function requestPdfVisionWithRetry({
       );
 
     /*
-     * A billing/quota exhaustion 429
-     * will not recover by sleeping.
+     * Billing/quota exhaustion cannot be
+     * fixed by sleeping and retrying.
      */
     if (
       isPermanentQuotaError(
@@ -428,8 +447,10 @@ async function requestPdfVisionWithRetry({
         "V2 PDF vision quota unavailable",
         {
           status: 429,
+
           providerType:
             rateLimitInfo.type,
+
           providerCode:
             rateLimitInfo.code,
         }
@@ -437,15 +458,18 @@ async function requestPdfVisionWithRetry({
 
       return {
         response,
+
         rateLimitRetries:
           totalRetries,
+
         finalRateLimitInfo:
           rateLimitInfo,
       };
     }
 
     /*
-     * No retry slots remain.
+     * Temporary rate limit but all retry
+     * attempts have been exhausted.
      */
     if (
       attempt >=
@@ -455,10 +479,13 @@ async function requestPdfVisionWithRetry({
         "V2 PDF vision rate limit retries exhausted",
         {
           status: 429,
+
           attempts:
             attempt,
+
           providerType:
             rateLimitInfo.type,
+
           providerCode:
             rateLimitInfo.code,
         }
@@ -466,25 +493,15 @@ async function requestPdfVisionWithRetry({
 
       return {
         response,
+
         rateLimitRetries:
           totalRetries,
+
         finalRateLimitInfo:
           rateLimitInfo,
       };
     }
 
-    /*
-     * Exponential backoff:
-     *
-     * 5s -> 10s by default.
-     *
-     * If OpenAI provides Retry-After,
-     * use at least that amount.
-     *
-     * Add small random jitter so several
-     * requests do not all retry on the
-     * same millisecond.
-     */
     const exponentialDelay =
       Math.min(
         retryMaxMs,
@@ -523,12 +540,17 @@ async function requestPdfVisionWithRetry({
       "V2 PDF vision rate limited; retry scheduled",
       {
         status: 429,
+
         attempt,
+
         maxAttempts,
+
         retryInMs:
           delayMs,
+
         providerType:
           rateLimitInfo.type,
+
         providerCode:
           rateLimitInfo.code,
       }
@@ -541,12 +563,14 @@ async function requestPdfVisionWithRetry({
 
   /*
    * Defensive fallback.
-   * The loop always returns.
+   * The loop above should always return.
    */
   return {
     response: null,
+
     rateLimitRetries:
       totalRetries,
+
     finalRateLimitInfo:
       null,
   };
@@ -703,16 +727,12 @@ async function recoverPdfTextWithVision({
       requestResult.rateLimitRetries;
 
     /*
-     * A dedicated alternate model must
-     * never break the proven primary
-     * production path.
+     * If a separately configured vision
+     * model rejects the PDF request, fall
+     * back to the proven primary model.
      *
-     * Only model/request incompatibility
-     * falls back to the primary model.
-     *
-     * 429 is NOT handled here because
-     * rate-limit retry is already handled
-     * above.
+     * Rate limiting is handled separately
+     * and must not cause a model switch.
      */
     const canRetryWithPrimary =
       selectedModel !==
@@ -768,6 +788,41 @@ async function recoverPdfTextWithVision({
 
       totalRateLimitRetries +=
         requestResult.rateLimitRetries;
+    }
+
+    /*
+     * Important:
+     *
+     * 429 is not a bad document.
+     *
+     * Distinguish a permanent provider
+     * quota/billing condition from a
+     * temporary rate-limit condition and
+     * propagate it to the HTTP route.
+     */
+    if (
+      !response?.ok &&
+      response?.status ===
+        429
+    ) {
+      const rateLimitInfo =
+        requestResult
+          ?.finalRateLimitInfo ||
+        {};
+
+      if (
+        isPermanentQuotaError(
+          rateLimitInfo
+        )
+      ) {
+        throw createVisionServiceError(
+          "V2_AI_QUOTA_EXHAUSTED"
+        );
+      }
+
+      throw createVisionServiceError(
+        "V2_AI_RATE_LIMITED"
+      );
     }
 
     if (
@@ -841,7 +896,25 @@ async function recoverPdfTextWithVision({
     };
   } catch (error) {
     /*
-     * Fail safely.
+     * These two conditions are service
+     * availability problems, not document
+     * extraction failures.
+     *
+     * Re-throw them so the parse API can
+     * return the correct public error code.
+     */
+    if (
+      error?.code ===
+        "V2_AI_QUOTA_EXHAUSTED" ||
+      error?.code ===
+        "V2_AI_RATE_LIMITED"
+    ) {
+      throw error;
+    }
+
+    /*
+     * All other provider failures remain
+     * fail-safe and privacy-safe.
      *
      * Never expose statement contents,
      * account information, prompts or
@@ -1043,7 +1116,9 @@ export async function extractTextFromFile(
 
     /*
      * Preserve existing fail-safe behaviour
-     * when external recovery is unavailable.
+     * when external recovery is unavailable
+     * for reasons other than explicit
+     * rate-limit/quota conditions.
      */
     return {
       text:
