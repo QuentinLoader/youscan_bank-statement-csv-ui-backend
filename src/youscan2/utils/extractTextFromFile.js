@@ -11,6 +11,11 @@ import pdfParse from "pdf-parse";
 const MIN_USEFUL_PDF_CHARS = 120;
 const MIN_USEFUL_ALPHANUMERIC_CHARS = 60;
 
+const DEFAULT_VISION_MAX_ATTEMPTS = 3;
+const DEFAULT_VISION_RETRY_BASE_MS = 5000;
+const DEFAULT_VISION_RETRY_MAX_MS = 30000;
+const MAX_RETRY_AFTER_MS = 60000;
+
 const PDF_VISION_PROMPT = `
 Transcribe this South African bank statement accurately for downstream deterministic parsing.
 
@@ -47,15 +52,180 @@ function normalizeText(value) {
     .trim();
 }
 
-export function hasUsefulPdfText(value) {
-  const text = normalizeText(value);
+function integerSetting(
+  value,
+  fallback,
+  {
+    min = 1,
+    max = Number.MAX_SAFE_INTEGER,
+  } = {}
+) {
+  const parsed = Number.parseInt(
+    String(value || ""),
+    10
+  );
 
-  if (text.length < MIN_USEFUL_PDF_CHARS) {
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.min(
+    max,
+    Math.max(
+      min,
+      parsed
+    )
+  );
+}
+
+function sleep(ms) {
+  return new Promise(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        ms
+      )
+  );
+}
+
+function parseRetryAfterMs(
+  response
+) {
+  const header =
+    response?.headers?.get?.(
+      "retry-after"
+    );
+
+  if (!header) {
+    return null;
+  }
+
+  const seconds =
+    Number(header);
+
+  if (
+    Number.isFinite(seconds) &&
+    seconds >= 0
+  ) {
+    return Math.min(
+      MAX_RETRY_AFTER_MS,
+      Math.round(
+        seconds * 1000
+      )
+    );
+  }
+
+  const retryDate =
+    Date.parse(
+      header
+    );
+
+  if (
+    Number.isFinite(
+      retryDate
+    )
+  ) {
+    return Math.min(
+      MAX_RETRY_AFTER_MS,
+      Math.max(
+        0,
+        retryDate -
+          Date.now()
+      )
+    );
+  }
+
+  return null;
+}
+
+async function readSafeRateLimitInfo(
+  response
+) {
+  if (
+    response?.status !==
+    429
+  ) {
+    return {
+      type: null,
+      code: null,
+    };
+  }
+
+  try {
+    /*
+     * This response is already an error
+     * response, so consuming its body is
+     * safe. We retain only non-sensitive
+     * error classification fields.
+     */
+    const payload =
+      await response.json();
+
+    return {
+      type:
+        typeof payload?.error
+          ?.type ===
+        "string"
+          ? payload.error.type
+          : null,
+
+      code:
+        typeof payload?.error
+          ?.code ===
+        "string"
+          ? payload.error.code
+          : null,
+    };
+  } catch {
+    return {
+      type: null,
+      code: null,
+    };
+  }
+}
+
+function isPermanentQuotaError(
+  rateLimitInfo
+) {
+  const type =
+    String(
+      rateLimitInfo?.type ||
+        ""
+    ).toLowerCase();
+
+  const code =
+    String(
+      rateLimitInfo?.code ||
+        ""
+    ).toLowerCase();
+
+  return (
+    type ===
+      "insufficient_quota" ||
+    code ===
+      "insufficient_quota"
+  );
+}
+
+export function hasUsefulPdfText(
+  value
+) {
+  const text =
+    normalizeText(
+      value
+    );
+
+  if (
+    text.length <
+    MIN_USEFUL_PDF_CHARS
+  ) {
     return false;
   }
 
   const alphaNumericCount = (
-    text.match(/[A-Za-z0-9]/g) || []
+    text.match(
+      /[A-Za-z0-9]/g
+    ) || []
   ).length;
 
   return (
@@ -64,36 +234,60 @@ export function hasUsefulPdfText(value) {
   );
 }
 
-function getResponseOutputText(response) {
+function getResponseOutputText(
+  response
+) {
   if (
-    typeof response?.output_text === "string" &&
+    typeof response
+      ?.output_text ===
+      "string" &&
     response.output_text.trim()
   ) {
     return response.output_text.trim();
   }
 
-  if (!Array.isArray(response?.output)) {
+  if (
+    !Array.isArray(
+      response?.output
+    )
+  ) {
     return "";
   }
 
   const parts = [];
 
-  for (const item of response.output) {
-    if (!Array.isArray(item?.content)) {
+  for (
+    const item of
+    response.output
+  ) {
+    if (
+      !Array.isArray(
+        item?.content
+      )
+    ) {
       continue;
     }
 
-    for (const content of item.content) {
+    for (
+      const content of
+      item.content
+    ) {
       if (
-        content?.type === "output_text" &&
-        typeof content.text === "string"
+        content?.type ===
+          "output_text" &&
+        typeof content.text ===
+          "string"
       ) {
-        parts.push(content.text);
+        parts.push(
+          content.text
+        );
       }
     }
   }
 
-  return parts.join("\n").trim();
+  return parts
+    .join("\n")
+    .trim();
 }
 
 async function requestPdfVision({
@@ -114,15 +308,29 @@ async function requestPdfVision({
 
         content: [
           {
-  type: "input_file",
-  filename: safeFileName,
-  file_data: fileData,
-  detail: "high",
-},
+            type:
+              "input_file",
+
+            filename:
+              safeFileName,
+
+            file_data:
+              fileData,
+
+            /*
+             * Keep the previously tested
+             * production request shape.
+             */
+            detail:
+              "high",
+          },
 
           {
-            type: "input_text",
-            text: PDF_VISION_PROMPT,
+            type:
+              "input_text",
+
+            text:
+              PDF_VISION_PROMPT,
           },
         ],
       },
@@ -132,18 +340,216 @@ async function requestPdfVision({
   return fetchImpl(
     `${baseUrl}/responses`,
     {
-      method: "POST",
+      method:
+        "POST",
 
       headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+        Authorization:
+          `Bearer ${apiKey}`,
+
+        "Content-Type":
+          "application/json",
       },
 
-      body: JSON.stringify(
-        requestBody
-      ),
+      body:
+        JSON.stringify(
+          requestBody
+        ),
     }
   );
+}
+
+async function requestPdfVisionWithRetry({
+  baseUrl,
+  apiKey,
+  model,
+  safeFileName,
+  fileData,
+  fetchImpl,
+  maxAttempts,
+  retryBaseMs,
+  retryMaxMs,
+}) {
+  let totalRetries =
+    0;
+
+  for (
+    let attempt = 1;
+    attempt <=
+    maxAttempts;
+    attempt += 1
+  ) {
+    const response =
+      await requestPdfVision({
+        baseUrl,
+        apiKey,
+        model,
+        safeFileName,
+        fileData,
+        fetchImpl,
+      });
+
+    /*
+     * Success, or an error other than
+     * rate limiting:
+     *
+     * return immediately and preserve
+     * existing behaviour.
+     */
+    if (
+      response?.ok ||
+      response?.status !==
+        429
+    ) {
+      return {
+        response,
+        rateLimitRetries:
+          totalRetries,
+        finalRateLimitInfo:
+          null,
+      };
+    }
+
+    const rateLimitInfo =
+      await readSafeRateLimitInfo(
+        response
+      );
+
+    /*
+     * A billing/quota exhaustion 429
+     * will not recover by sleeping.
+     */
+    if (
+      isPermanentQuotaError(
+        rateLimitInfo
+      )
+    ) {
+      console.warn(
+        "V2 PDF vision quota unavailable",
+        {
+          status: 429,
+          providerType:
+            rateLimitInfo.type,
+          providerCode:
+            rateLimitInfo.code,
+        }
+      );
+
+      return {
+        response,
+        rateLimitRetries:
+          totalRetries,
+        finalRateLimitInfo:
+          rateLimitInfo,
+      };
+    }
+
+    /*
+     * No retry slots remain.
+     */
+    if (
+      attempt >=
+      maxAttempts
+    ) {
+      console.warn(
+        "V2 PDF vision rate limit retries exhausted",
+        {
+          status: 429,
+          attempts:
+            attempt,
+          providerType:
+            rateLimitInfo.type,
+          providerCode:
+            rateLimitInfo.code,
+        }
+      );
+
+      return {
+        response,
+        rateLimitRetries:
+          totalRetries,
+        finalRateLimitInfo:
+          rateLimitInfo,
+      };
+    }
+
+    /*
+     * Exponential backoff:
+     *
+     * 5s -> 10s by default.
+     *
+     * If OpenAI provides Retry-After,
+     * use at least that amount.
+     *
+     * Add small random jitter so several
+     * requests do not all retry on the
+     * same millisecond.
+     */
+    const exponentialDelay =
+      Math.min(
+        retryMaxMs,
+        retryBaseMs *
+          2 ** (
+            attempt - 1
+          )
+      );
+
+    const retryAfterMs =
+      parseRetryAfterMs(
+        response
+      );
+
+    const jitterMs =
+      Math.floor(
+        Math.random() *
+          1000
+      );
+
+    const delayMs =
+      Math.min(
+        MAX_RETRY_AFTER_MS,
+        Math.max(
+          exponentialDelay,
+          retryAfterMs ||
+            0
+        ) +
+          jitterMs
+      );
+
+    totalRetries +=
+      1;
+
+    console.warn(
+      "V2 PDF vision rate limited; retry scheduled",
+      {
+        status: 429,
+        attempt,
+        maxAttempts,
+        retryInMs:
+          delayMs,
+        providerType:
+          rateLimitInfo.type,
+        providerCode:
+          rateLimitInfo.code,
+      }
+    );
+
+    await sleep(
+      delayMs
+    );
+  }
+
+  /*
+   * Defensive fallback.
+   * The loop always returns.
+   */
+  return {
+    response: null,
+    rateLimitRetries:
+      totalRetries,
+    finalRateLimitInfo:
+      null,
+  };
 }
 
 async function recoverPdfTextWithVision({
@@ -152,19 +558,23 @@ async function recoverPdfTextWithVision({
   env,
   fetchImpl,
 }) {
-  const fallbackEnabled = enabled(
-    env.YOUSCAN_V2_PDF_VISION_FALLBACK_ENABLED
-  );
+  const fallbackEnabled =
+    enabled(
+      env.YOUSCAN_V2_PDF_VISION_FALLBACK_ENABLED
+    );
 
-  if (!fallbackEnabled) {
+  if (
+    !fallbackEnabled
+  ) {
     return null;
   }
 
-  const apiKey = String(
-    env.YOUSCAN_V2_OPENAI_API_KEY ||
-      env.OPENAI_API_KEY ||
-      ""
-  ).trim();
+  const apiKey =
+    String(
+      env.YOUSCAN_V2_OPENAI_API_KEY ||
+        env.OPENAI_API_KEY ||
+        ""
+    ).trim();
 
   if (!apiKey) {
     console.warn(
@@ -174,7 +584,10 @@ async function recoverPdfTextWithVision({
     return null;
   }
 
-  if (typeof fetchImpl !== "function") {
+  if (
+    typeof fetchImpl !==
+    "function"
+  ) {
     console.warn(
       "V2 PDF vision fallback unavailable: fetch not configured"
     );
@@ -182,27 +595,59 @@ async function recoverPdfTextWithVision({
     return null;
   }
 
-  /*
-   * Dedicated model for scanned-PDF transcription.
-   *
-   * If not configured, use the primary V2 AI model.
-   */
-  const primaryModel = String(
-    env.YOUSCAN_V2_AI_MODEL ||
-      "gpt-5.6"
-  ).trim();
+  const primaryModel =
+    String(
+      env.YOUSCAN_V2_AI_MODEL ||
+        "gpt-5.6"
+    ).trim();
 
-  const preferredVisionModel = String(
-    env.YOUSCAN_V2_PDF_VISION_MODEL ||
-      primaryModel
-  ).trim();
+  const preferredVisionModel =
+    String(
+      env.YOUSCAN_V2_PDF_VISION_MODEL ||
+        primaryModel
+    ).trim();
 
-  const baseUrl = String(
-    env.YOUSCAN_V2_OPENAI_BASE_URL ||
-      "https://api.openai.com/v1"
-  )
-    .trim()
-    .replace(/\/+$/, "");
+  const maxAttempts =
+    integerSetting(
+      env.YOUSCAN_V2_PDF_VISION_MAX_ATTEMPTS,
+      DEFAULT_VISION_MAX_ATTEMPTS,
+      {
+        min: 1,
+        max: 4,
+      }
+    );
+
+  const retryBaseMs =
+    integerSetting(
+      env.YOUSCAN_V2_PDF_VISION_RETRY_BASE_MS,
+      DEFAULT_VISION_RETRY_BASE_MS,
+      {
+        min: 1000,
+        max: 30000,
+      }
+    );
+
+  const retryMaxMs =
+    integerSetting(
+      env.YOUSCAN_V2_PDF_VISION_RETRY_MAX_MS,
+      DEFAULT_VISION_RETRY_MAX_MS,
+      {
+        min:
+          retryBaseMs,
+        max: 60000,
+      }
+    );
+
+  const baseUrl =
+    String(
+      env.YOUSCAN_V2_OPENAI_BASE_URL ||
+        "https://api.openai.com/v1"
+    )
+      .trim()
+      .replace(
+        /\/+$/,
+        ""
+      );
 
   const safeFileName =
     String(
@@ -230,9 +675,12 @@ async function recoverPdfTextWithVision({
   let selectedModel =
     preferredVisionModel;
 
+  let totalRateLimitRetries =
+    0;
+
   try {
-    let response =
-      await requestPdfVision({
+    let requestResult =
+      await requestPdfVisionWithRetry({
         baseUrl,
         apiKey,
 
@@ -242,14 +690,29 @@ async function recoverPdfTextWithVision({
         safeFileName,
         fileData,
         fetchImpl,
+
+        maxAttempts,
+        retryBaseMs,
+        retryMaxMs,
       });
 
+    let response =
+      requestResult.response;
+
+    totalRateLimitRetries +=
+      requestResult.rateLimitRetries;
+
     /*
-     * A dedicated vision model must never break a path that already worked
-     * with the primary YouScan AI model.
+     * A dedicated alternate model must
+     * never break the proven primary
+     * production path.
      *
-     * If the dedicated model rejects the PDF request, retry once with the
-     * proven primary model.
+     * Only model/request incompatibility
+     * falls back to the primary model.
+     *
+     * 429 is NOT handled here because
+     * rate-limit retry is already handled
+     * above.
      */
     const canRetryWithPrimary =
       selectedModel !==
@@ -283,8 +746,8 @@ async function recoverPdfTextWithVision({
       selectedModel =
         primaryModel;
 
-      response =
-        await requestPdfVision({
+      requestResult =
+        await requestPdfVisionWithRetry({
           baseUrl,
           apiKey,
 
@@ -294,10 +757,22 @@ async function recoverPdfTextWithVision({
           safeFileName,
           fileData,
           fetchImpl,
+
+          maxAttempts,
+          retryBaseMs,
+          retryMaxMs,
         });
+
+      response =
+        requestResult.response;
+
+      totalRateLimitRetries +=
+        requestResult.rateLimitRetries;
     }
 
-    if (!response?.ok) {
+    if (
+      !response?.ok
+    ) {
       console.warn(
         "V2 PDF vision fallback failed:",
         `HTTP_${response?.status || "UNKNOWN"}`
@@ -360,13 +835,17 @@ async function recoverPdfTextWithVision({
       usedPrimaryFallback:
         selectedModel !==
         preferredVisionModel,
+
+      rateLimitRetries:
+        totalRateLimitRetries,
     };
   } catch (error) {
     /*
      * Fail safely.
      *
-     * Do not expose provider responses, document contents,
-     * prompts, account details or statement data in logs.
+     * Never expose statement contents,
+     * account information, prompts or
+     * provider response bodies.
      */
     console.warn(
       "V2 PDF vision fallback error:",
@@ -382,9 +861,12 @@ async function recoverPdfTextWithVision({
 export async function extractTextFromFile(
   file,
   {
-    pdfParseImpl = pdfParse,
+    pdfParseImpl =
+      pdfParse,
+
     fetchImpl =
       globalThis.fetch,
+
     env =
       process.env,
   } = {}
@@ -437,10 +919,8 @@ export async function extractTextFromFile(
       );
 
     /*
-     * Normal digitally-generated PDF.
-     *
-     * This remains the preferred and fastest path.
-     * No OpenAI request is made.
+     * Normal digitally-generated PDF:
+     * no OpenAI request.
      */
     if (
       hasUsefulPdfText(
@@ -474,8 +954,6 @@ export async function extractTextFromFile(
 
     /*
      * Scanned/image-only PDF.
-     *
-     * Vision is attempted only when explicitly enabled.
      */
     const recovery =
       await recoverPdfTextWithVision({
@@ -483,9 +961,7 @@ export async function extractTextFromFile(
           file.buffer,
 
         fileName,
-
         env,
-
         fetchImpl,
       });
 
@@ -516,6 +992,9 @@ export async function extractTextFromFile(
 
           usedPrimaryFallback:
             recovery.usedPrimaryFallback,
+
+          rateLimitRetries:
+            recovery.rateLimitRetries,
         }
       );
 
@@ -555,13 +1034,16 @@ export async function extractTextFromFile(
 
           visionPrimaryFallbackUsed:
             recovery.usedPrimaryFallback,
+
+          visionRateLimitRetries:
+            recovery.rateLimitRetries,
         },
       };
     }
 
     /*
-     * Preserve existing behaviour if external recovery is disabled
-     * or unavailable.
+     * Preserve existing fail-safe behaviour
+     * when external recovery is unavailable.
      */
     return {
       text:
@@ -602,11 +1084,9 @@ export async function extractTextFromFile(
         sourceType:
           "text",
 
-        pages:
-          1,
+        pages: 1,
 
-        info:
-          null,
+        info: null,
       },
     };
   }
@@ -621,11 +1101,9 @@ export async function extractTextFromFile(
       sourceType:
         "unknown",
 
-      pages:
-        null,
+      pages: null,
 
-      info:
-        null,
+      info: null,
     },
   };
 }

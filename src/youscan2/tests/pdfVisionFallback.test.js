@@ -194,3 +194,106 @@ test("useful text detection rejects empty scanned PDF output", () => {
     true
   );
 });
+test(
+  "vision fallback retries a temporary HTTP 429 and succeeds",
+  async () => {
+    let calls = 0;
+
+    const result =
+      await extractTextFromFile(
+        pdfFile(),
+        {
+          pdfParseImpl:
+            async () => ({
+              text: "",
+              numpages: 2,
+              info: null,
+            }),
+
+          fetchImpl:
+            async () => {
+              calls += 1;
+
+              if (calls === 1) {
+                return {
+                  ok: false,
+                  status: 429,
+
+                  headers: {
+                    get(name) {
+                      if (
+                        String(name)
+                          .toLowerCase() ===
+                        "retry-after"
+                      ) {
+                        return "0";
+                      }
+
+                      return null;
+                    },
+                  },
+
+                  async json() {
+                    return {
+                      error: {
+                        type:
+                          "rate_limit_error",
+
+                        code:
+                          "rate_limit_exceeded",
+                      },
+                    };
+                  },
+                };
+              }
+
+              return completedOpenAiResponse(
+                recoveredFnbText
+              );
+            },
+
+          env: {
+            YOUSCAN_V2_PDF_VISION_FALLBACK_ENABLED:
+              "true",
+
+            OPENAI_API_KEY:
+              "synthetic-key",
+
+            YOUSCAN_V2_AI_MODEL:
+              "gpt-5.6",
+
+            YOUSCAN_V2_PDF_VISION_MAX_ATTEMPTS:
+              "2",
+
+            YOUSCAN_V2_PDF_VISION_RETRY_BASE_MS:
+              "1000",
+
+            YOUSCAN_V2_PDF_VISION_RETRY_MAX_MS:
+              "1000",
+          },
+        }
+      );
+
+    assert.equal(
+      calls,
+      2
+    );
+
+    assert.equal(
+      result.meta
+        .visionFallbackUsed,
+      true
+    );
+
+    assert.equal(
+      result.meta
+        .visionRateLimitRetries,
+      1
+    );
+
+    assert.match(
+      result.text,
+      /First National Bank/
+    );
+  }
+);
