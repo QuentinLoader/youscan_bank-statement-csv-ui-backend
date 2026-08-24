@@ -131,11 +131,6 @@ test(
 
     assert.ok(payment);
 
-    /*
-     * Main payment: -35.00
-     * Fee:          -1.00
-     * Net movement: -36.00
-     */
     assert.equal(
       payment.amount,
       -36
@@ -327,6 +322,92 @@ Date Description Category Money In Money Out Fee* Balance
     assert.equal(
       transactions[2].balance,
       13.24
+    );
+  }
+);
+
+test(
+  "Capitec real PDF format separates fused monetary columns",
+  () => {
+    const singleRow = (
+      row,
+      openingBalance
+    ) => {
+      const sample = `
+Transaction History
+
+Date Description Category Money In Money Out Fee* Balance
+
+${row}
+`;
+
+      return extractCapitecTransactions(
+        sample,
+        openingBalance
+      );
+    };
+
+    const feeRow =
+      singleRow(
+        "12/12/2025 Banking App External PayShap Payment Digital Payments-200.00-6.002 372.24",
+        2578.24
+      );
+
+    assert.equal(
+      feeRow.length,
+      1
+    );
+
+    assert.equal(
+      feeRow[0].amount,
+      -206
+    );
+
+    assert.equal(
+      feeRow[0].balance,
+      2372.24
+    );
+
+    const fusedBalanceRow =
+      singleRow(
+        "16/12/2025 ATM Cash Withdrawal Cash Withdrawal-83.0082.24",
+        165.24
+      );
+
+    assert.equal(
+      fusedBalanceRow.length,
+      1
+    );
+
+    assert.equal(
+      fusedBalanceRow[0].amount,
+      -83
+    );
+
+    assert.equal(
+      fusedBalanceRow[0].balance,
+      82.24
+    );
+
+    const thousandsBalanceRow =
+      singleRow(
+        "01/03/2025 Live Better Interest Sweep Transfer-0.621 525.23",
+        1525.85
+      );
+
+    assert.equal(
+      thousandsBalanceRow.length,
+      1
+    );
+
+    assert.equal(
+      thousandsBalanceRow[0].amount,
+      -0.62
+    );
+
+    assert.equal(
+      thousandsBalanceRow[0].balance,
+      1525.23
     );
   }
 );

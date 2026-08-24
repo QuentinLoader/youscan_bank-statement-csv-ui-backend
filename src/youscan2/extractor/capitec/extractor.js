@@ -2,20 +2,15 @@
  * YouScan V2
  * Capitec bank-statement transaction extractor.
  *
- * Supports both:
- * - the original deterministic Capitec fixtures
+ * Supports:
+ * - deterministic Capitec fixtures
  * - real multi-page Capitec Main Account statements
+ * - pipe/column-separated PDF text
+ * - PDF text with fused monetary columns
  *
  * Real Capitec layout:
  *
  * Date | Description | Category | Money In | Money Out | Fee* | Balance
- *
- * Important:
- * - transaction history may continue across several PDF pages
- * - each page may repeat headers, VAT notes and footer text
- * - descriptions/categories may wrap across lines
- * - a transaction may contain an amount plus a separate fee
- * - running balances are authoritative evidence
  */
 
 import { normalizeDateToken } from "../shared/dates.js";
@@ -25,6 +20,16 @@ import { normalizeWhitespace } from "../shared/utils.js";
 const ROW_DATE =
   /^(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})(?=\s|[A-Za-z|¦│])/;
 
+/**
+ * Monetary token.
+ *
+ * The leading boundary is intentionally broader than whitespace
+ * because real PDF extraction can glue a monetary value directly
+ * to category/description text.
+ *
+ * Fused monetary values themselves are separated first by
+ * normalizeMoneyLayout().
+ */
 const MONEY_TOKEN =
   /(?:^|[^\d.,])((?:R\s*)?-?(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2})\*?(?!\d)/gi;
 
@@ -56,9 +61,62 @@ function parseCapitecMoney(value) {
 }
 
 /**
- * Headers that may occur at the beginning of the transaction
- * section or be repeated on subsequent pages.
+ * Normalize real Capitec PDF transaction-column text.
+ *
+ * Production PDF extraction can produce strings such as:
+ *
+ *   -200.00-6.002 372.24
+ *   -83.0082.24
+ *   -0.621 525.23
+ *
+ * They actually represent:
+ *
+ *   -200.00  -6.00  2 372.24
+ *   -83.00   82.24
+ *   -0.62    1 525.23
+ *
+ * This function inserts only structural whitespace. It does not
+ * change any numeric values.
  */
+function normalizeMoneyLayout(value = "") {
+  let source = String(value || "")
+    .replace(/\u00a0/g, " ")
+    .replace(/[|¦│]/g, " ");
+
+  /*
+   * Separate monetary values fused immediately after a
+   * two-decimal monetary value.
+   *
+   * Repeat until stable because one source string can contain
+   * more than one fused boundary.
+   */
+  let previous;
+
+  do {
+    previous = source;
+
+    source = source.replace(
+      /(\.\d{2}\*?)(?=(?:R\s*)?-?\d)/g,
+      "$1 "
+    );
+  } while (source !== previous);
+
+  /*
+   * A transaction amount can occasionally be glued directly
+   * after a numeric reference/card suffix:
+   *
+   *   7827-1475.99
+   *
+   * The minus sign gives us a safe structural boundary.
+   */
+  source = source.replace(
+    /(\d)(?=-\d+(?:[ ,]\d{3})*\.\d{2})/g,
+    "$1 "
+  );
+
+  return source;
+}
+
 function isRepeatedTableHeader(line = "") {
   const value = normalizeWhitespace(line);
 
@@ -73,10 +131,10 @@ function isRepeatedTableHeader(line = "") {
 }
 
 /**
- * Lines that terminate the currently active transaction row.
+ * These lines terminate an active transaction row.
  *
- * This prevents statement totals, page furniture and summary
- * values from being attached to the preceding transaction.
+ * They must not be appended to the previous transaction because
+ * summary amounts could otherwise be misread as transaction values.
  */
 function isTransactionBoundary(line = "") {
   const value = normalizeWhitespace(line);
@@ -102,10 +160,10 @@ function isTransactionBoundary(line = "") {
 }
 
 /**
- * Keep all source text after the first Transaction History heading.
+ * Keep all text after the first Transaction History heading.
  *
- * Do not stop at the first VAT/footer marker because real Capitec
- * statements can continue transaction history on later PDF pages.
+ * We deliberately do not stop at the first page footer because
+ * real Capitec transaction history spans multiple PDF pages.
  */
 function isolateTransactionHistory(text = "") {
   const source = String(text || "");
@@ -130,9 +188,9 @@ function isolateTransactionHistory(text = "") {
 /**
  * Reconstruct logical transaction rows.
  *
- * A dated line begins a new transaction. Subsequent non-boundary
- * lines are treated as wrapped description/category content until
- * another dated row or a page/summary boundary appears.
+ * A dated line begins a new transaction.
+ * Wrapped description/category lines are appended until another
+ * transaction date or a recognised page/section boundary.
  */
 function reconstructRows(text = "") {
   const lines = String(text || "")
@@ -190,19 +248,8 @@ function reconstructRows(text = "") {
 function extractMoneyTokens(body = "") {
   const matches = [];
 
-  /*
-   * Real PDF extraction can preserve Capitec table-column
-   * separators such as:
-   *
-   *   |   │   ¦
-   *
-   * Replace each separator with a single space. Because each
-   * replacement is one character long, token indexes still
-   * correspond to the original row and description slicing
-   * remains safe.
-   */
-  const source = String(body || "")
-    .replace(/[|¦│]/g, " ");
+  const source =
+    normalizeMoneyLayout(body);
 
   MONEY_TOKEN.lastIndex = 0;
 
@@ -246,7 +293,10 @@ function approximatelyEqual(left, right) {
   );
 }
 
-function absoluteApproximatelyEqual(left, right) {
+function absoluteApproximatelyEqual(
+  left,
+  right
+) {
   return approximatelyEqual(
     Math.abs(left),
     Math.abs(right)
@@ -254,23 +304,19 @@ function absoluteApproximatelyEqual(left, right) {
 }
 
 /**
- * Determine which printed monetary token(s) represent the
- * transaction movement.
+ * Determine the transaction movement represented by the final
+ * monetary columns before the running balance.
  *
- * Examples:
+ * Common formats:
  *
  * Normal:
- *   -100.00   900.00
+ *   amount | balance
  *
  * Fee-bearing:
- *   -35.00   -1.00   33.87
+ *   amount | fee | balance
  *
- * The running-balance delta is used as evidence to resolve
- * debit/credit signs and amount+fee combinations.
- *
- * If the printed values genuinely disagree with the balance
- * movement, the printed candidate is preserved so validation
- * can route the statement to Review Required.
+ * The running balance is used to resolve direction and to decide
+ * whether amount + fee is the correct account movement.
  */
 function resolveMovement({
   money,
@@ -308,7 +354,7 @@ function resolveMovement({
   const candidates = [];
 
   /*
-   * Standard amount + balance layout.
+   * Normal amount + balance.
    */
   candidates.push({
     value: last.value,
@@ -317,7 +363,9 @@ function resolveMovement({
 
   if (secondLast) {
     /*
-     * Real Capitec amount + fee + balance.
+     * Real Capitec:
+     *
+     * amount + fee + balance.
      */
     candidates.push({
       value: round2(
@@ -329,8 +377,8 @@ function resolveMovement({
     });
 
     /*
-     * Keep the preceding monetary token independently
-     * for legacy/ambiguous layouts.
+     * Retain the preceding monetary field independently for
+     * ambiguous/legacy layouts.
      */
     candidates.push({
       value: secondLast.value,
@@ -340,7 +388,8 @@ function resolveMovement({
   }
 
   /*
-   * No running-balance evidence available.
+   * Without both running balances we cannot verify against
+   * observed account movement.
    */
   if (
     typeof balance !== "number" ||
@@ -369,7 +418,7 @@ function resolveMovement({
     );
 
   /*
-   * Exact signed match.
+   * Exact signed agreement.
    */
   for (const candidate of candidates) {
     if (
@@ -387,8 +436,8 @@ function resolveMovement({
   }
 
   /*
-   * Same absolute value but ambiguous/missing sign.
-   * Running balance determines debit/credit direction.
+   * Same magnitude but ambiguous/missing debit-credit sign.
+   * Running balance determines the correct direction.
    */
   for (const candidate of candidates) {
     if (
@@ -408,9 +457,9 @@ function resolveMovement({
   /*
    * Genuine disagreement.
    *
-   * Preserve the source candidate rather than silently
-   * rewriting it. The validator can then surface
-   * balance_continuity_mismatch / Review Required.
+   * Preserve the printed source candidate so the validator
+   * can surface balance_continuity_mismatch rather than
+   * silently rewriting source data.
    */
   const preferred =
     secondLast
@@ -486,7 +535,7 @@ function parseRow(
 
   const description =
     normalizeWhitespace(
-      body.slice(
+      normalizeMoneyLayout(body).slice(
         0,
         descriptionEnd
       )
@@ -515,15 +564,16 @@ function parseRow(
 /**
  * Extract Capitec transactions.
  *
- * The structure diagnostic deliberately logs only counts/lengths.
- * It does NOT log customer names, account numbers, descriptions,
- * monetary values or raw statement text.
+ * Diagnostic output contains structural counts only.
+ * It does not log statement text, names, account numbers,
+ * descriptions or monetary values.
  */
 export function extractCapitecTransactions(
   text,
   openingBalance = null
 ) {
-  const source = String(text || "");
+  const source =
+    String(text || "");
 
   const transactionBlock =
     isolateTransactionHistory(source);
@@ -571,26 +621,17 @@ export function extractCapitecTransactions(
       JSON.stringify({
         textLength:
           source.length,
-
         transactionHistoryCount,
-
         transactionHistoryFound:
           false,
-
         transactionBlockLength:
           0,
-
         slashDateCount,
-
         dashDateCount,
-
         lineStartingDateCount,
-
         moneyLikeTokenCount,
-
         reconstructedRowCount:
           0,
-
         parsedTransactionCount:
           0,
       })
@@ -642,26 +683,17 @@ export function extractCapitecTransactions(
     JSON.stringify({
       textLength:
         source.length,
-
       transactionHistoryCount,
-
       transactionHistoryFound:
         true,
-
       transactionBlockLength:
         transactionBlock.length,
-
       slashDateCount,
-
       dashDateCount,
-
       lineStartingDateCount,
-
       moneyLikeTokenCount,
-
       reconstructedRowCount:
         rows.length,
-
       parsedTransactionCount:
         transactions.length,
     })
