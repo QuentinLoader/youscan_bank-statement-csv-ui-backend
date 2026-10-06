@@ -99,11 +99,13 @@ export async function runAiBankStatementShadow({
   config = null,
   provider = null,
   logger = null,
+  required = false,
 } = {}) {
   let resolvedConfig;
   try {
     resolvedConfig = config || getAiConfig();
   } catch (error) {
+    if (required) throw error;
     return {
       mode: "shadow",
       attempted: false,
@@ -120,6 +122,11 @@ export async function runAiBankStatementShadow({
   }
 
   if (!resolvedConfig.enabled || !resolvedConfig.extractionEnabled) {
+    if (required) {
+      const error = new Error("Required AI extraction is disabled");
+      error.code = "V2_AI_DISABLED";
+      throw error;
+    }
     return {
       mode: "shadow",
       attempted: false,
@@ -196,6 +203,7 @@ export async function runAiBankStatementShadow({
 
     return report;
   } catch (error) {
+    if (required) throw error;
     return {
       mode: "shadow",
       attempted: true,

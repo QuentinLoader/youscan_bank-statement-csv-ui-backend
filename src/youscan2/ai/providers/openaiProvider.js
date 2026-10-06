@@ -218,6 +218,7 @@ export function createOpenAiProvider(config, options = {}) {
       systemPrompt = "",
       responseSchema,
       signal,
+      maxOutputTokens,
     }) {
       const normalizedTask = requireNonEmptyString(task, "AI task name is required");
       const envelopeSchema = buildOpenAiEnvelopeSchema(
@@ -227,6 +228,7 @@ export function createOpenAiProvider(config, options = {}) {
       const body = {
         model,
         store: false,
+        ...(maxOutputTokens ? { max_output_tokens: maxOutputTokens } : {}),
         input: [
           {
             role: "system",
@@ -273,17 +275,23 @@ export function createOpenAiProvider(config, options = {}) {
       }
 
       if (!httpResponse.ok) {
-        // Deliberately do not read or propagate the provider response body. It
-        // may contain request fragments or other sensitive diagnostic data.
-        if (typeof httpResponse.body?.cancel === "function") {
-          await httpResponse.body.cancel().catch(() => {});
-        }
+        // Preserve only machine-readable failure metadata, never the upstream
+        // message/body (which can contain keys or document fragments).
+        let failure;
+        try { failure = await httpResponse.json(); } catch { /* status is sufficient */ }
+        const safeCode = (value) => typeof value === "string" &&
+          /^[a-zA-Z0-9_-]{1,100}$/.test(value) ? value : null;
+        const providerCode = safeCode(failure?.error?.code);
+        const providerType = safeCode(failure?.error?.type);
         throw new AiError(
           AI_ERROR_CODES.PROVIDER_FAILED,
           `OpenAI request failed with HTTP ${httpResponse.status}`,
           {
             retryable: httpResponse.status === 429 || httpResponse.status >= 500,
-            details: { status: httpResponse.status },
+            details: {
+              status: httpResponse.status, providerCode, providerType,
+              requestId: httpResponse.headers?.get?.("x-request-id") || null,
+            },
           }
         );
       }

@@ -72,6 +72,7 @@ export async function runAiTask({
   config = null,
   provider = null,
   logger = null,
+  maxOutputTokens,
 }) {
   const resolvedConfig = config || getAiConfig();
 
@@ -108,6 +109,7 @@ export async function runAiTask({
         input,
         systemPrompt,
         responseSchema,
+        maxOutputTokens,
       },
       resolvedConfig.timeoutMs
     );
@@ -147,7 +149,7 @@ export async function runAiTask({
       : new AiError(
           AI_ERROR_CODES.PROVIDER_FAILED,
           "YouScan V2 AI provider call failed",
-          { cause: error, retryable: true }
+          { cause: error, retryable: true, details: { providerCode: "connection_error" } }
         );
 
     emitSafeAiLog(logger, {

@@ -119,6 +119,7 @@ export async function classifyDocument({
   aiConfig = null,
   aiProvider = null,
   aiLogger = null,
+  requireAi = false,
 } = {}) {
   const heuristic = heuristicClassifier(extractedText);
   const initial = baseResult(heuristic, fileName);
@@ -135,6 +136,7 @@ export async function classifyDocument({
   try {
     config = aiConfig || getAiConfig();
   } catch (error) {
+    if (requireAi) throw error;
     // A bad AI configuration must not break deterministic parsing while the
     // classifier feature itself is not active.
     if (!aiConfig && !process.env.YOUSCAN_V2_AI_CLASSIFIER_ENABLED) {
@@ -177,6 +179,7 @@ export async function classifyDocument({
     return acceptedAiResult({ heuristic, aiResult, fileName });
   } catch (error) {
     const errorCode = isAiError(error) ? error.code : "V2_AI_CLASSIFICATION_FAILED";
+    if (requireAi) throw error;
     return reviewResult({
       heuristic,
       fileName,

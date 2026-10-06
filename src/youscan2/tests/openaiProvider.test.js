@@ -407,6 +407,26 @@ test("Batch 09 HTTP authentication failures are not marked retryable", async () 
   }
 });
 
+test("OpenAI quota metadata is retained internally without leaking upstream messages", async () => {
+  const server = await startServer((_req, res) => {
+    res.writeHead(429, { "content-type": "application/json", "x-request-id": "req-quota" });
+    res.end(JSON.stringify({ error: {
+      code: "insufficient_quota", type: "insufficient_quota", message: "private account details",
+    } }));
+  });
+  try {
+    const provider = createOpenAiProvider(makeConfig(server.baseUrl));
+    await assert.rejects(() => provider.generateStructured({
+      task: TASK, input: "synthetic", responseSchema: DATA_SCHEMA,
+    }), (error) => {
+      assert.equal(error.details.providerCode, "insufficient_quota");
+      assert.equal(error.details.requestId, "req-quota");
+      assert.ok(!JSON.stringify(error).includes("private account details"));
+      return true;
+    });
+  } finally { await server.close(); }
+});
+
 test("Batch 09 malformed successful HTTP JSON is rejected without repair", async () => {
   const server = await startServer((_req, res) => {
     res.writeHead(200, { "content-type": "application/json" });

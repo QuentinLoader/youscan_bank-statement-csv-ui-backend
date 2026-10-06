@@ -581,6 +581,7 @@ async function recoverPdfTextWithVision({
   fileName,
   env,
   fetchImpl,
+  requireAi = false,
 }) {
   const fallbackEnabled =
     enabled(
@@ -632,7 +633,7 @@ async function recoverPdfTextWithVision({
     ).trim();
 
   const maxAttempts =
-    integerSetting(
+    requireAi ? 1 : integerSetting(
       env.YOUSCAN_V2_PDF_VISION_MAX_ATTEMPTS,
       DEFAULT_VISION_MAX_ATTEMPTS,
       {
@@ -696,6 +697,12 @@ async function recoverPdfTextWithVision({
   const visionStartedAt =
     Date.now();
 
+  const boundedFetch = requireAi
+    ? (url, options) => fetchImpl(url, {
+        ...options, signal: AbortSignal.timeout(20_000),
+      })
+    : fetchImpl;
+
   let selectedModel =
     preferredVisionModel;
 
@@ -713,7 +720,7 @@ async function recoverPdfTextWithVision({
 
         safeFileName,
         fileData,
-        fetchImpl,
+        fetchImpl: boundedFetch,
 
         maxAttempts,
         retryBaseMs,
@@ -776,7 +783,7 @@ async function recoverPdfTextWithVision({
 
           safeFileName,
           fileData,
-          fetchImpl,
+          fetchImpl: boundedFetch,
 
           maxAttempts,
           retryBaseMs,
@@ -828,6 +835,11 @@ async function recoverPdfTextWithVision({
     if (
       !response?.ok
     ) {
+      if (requireAi) {
+        const error = createVisionServiceError("V2_AI_PROVIDER_FAILED");
+        error.details = { status: response?.status || null };
+        throw error;
+      }
       console.warn(
         "V2 PDF vision fallback failed:",
         `HTTP_${response?.status || "UNKNOWN"}`
@@ -907,9 +919,18 @@ async function recoverPdfTextWithVision({
       error?.code ===
         "V2_AI_QUOTA_EXHAUSTED" ||
       error?.code ===
-        "V2_AI_RATE_LIMITED"
+        "V2_AI_RATE_LIMITED" ||
+      (requireAi && error?.code === "V2_AI_PROVIDER_FAILED")
     ) {
       throw error;
+    }
+
+    if (requireAi) {
+      const failure = createVisionServiceError(
+        error?.name === "AbortError" || error?.name === "TimeoutError"
+          ? "V2_AI_TIMEOUT" : "V2_AI_PROVIDER_FAILED"
+      );
+      throw failure;
     }
 
     /*
@@ -942,6 +963,7 @@ export async function extractTextFromFile(
 
     env =
       process.env,
+    requireAi = false,
   } = {}
 ) {
   if (
@@ -1036,6 +1058,7 @@ export async function extractTextFromFile(
         fileName,
         env,
         fetchImpl,
+        requireAi,
       });
 
     if (

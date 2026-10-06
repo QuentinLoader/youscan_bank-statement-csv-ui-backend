@@ -1,5 +1,49 @@
 # YouScan V2
 
+## Required AI availability gate
+
+The production `POST /api/v2/parse` endpoint requires successful OpenAI
+bank-statement extraction before returning usable results. Deterministic parsing
+and the existing comparison/review workflow remain; disabled, failed or rejected
+AI extraction cannot silently become a completed customer analysis.
+
+`GET /api/v2/parse/availability` requires the usual customer JWT and returns
+`available`, `checkedAt` (Unix milliseconds), `retryAfterSeconds`, and a generic
+customer message. It never returns provider errors. The frontend polls this
+endpoint every minute and checks it again before starting an upload batch.
+
+The backend uses one process-local cache with a single in-flight probe. A stale
+cache checks the configured OpenAI model through the existing structured Responses
+adapter using a tiny synthetic input, `store:false`, a 2048-token output cap and
+the configured task timeout. Health is cached for five minutes. Quota/auth/config
+failures retry after five minutes; transient outages, rate limits and timeouts
+retry after one minute. Rechecks are demand-driven, with no background traffic.
+Actual document failures immediately mark the provider unavailable. A probe that
+started before a processing failure cannot clear that newer failure.
+
+Required configuration: `YOUSCAN_V2_AI_ENABLED=true`,
+`YOUSCAN_V2_AI_EXTRACTION_ENABLED=true`, `YOUSCAN_V2_AI_PROVIDER=openai`,
+`YOUSCAN_V2_AI_MODEL`, and `YOUSCAN_V2_OPENAI_API_KEY` or `OPENAI_API_KEY`.
+Missing configuration fails closed. No new environment variables or migrations.
+
+Unavailability returns HTTP 503 with code `V2_AI_UNAVAILABLE` and
+"Document analysis is temporarily unavailable. Please try again later."
+Internal logs retain safe provider codes, HTTP status and request IDs (including
+quota versus rate-limit reasons); upstream messages and document contents are
+excluded. Document-specific invalid output/refusals fail that document without
+marking the provider globally unavailable.
+
+Billing remains export-based: parse failures create no usable/exportable result
+and incur no charge. Already parsed documents can still be exported. Frontend
+batches stop on a service outage; selected files remain in browser memory for
+retry. This change adds no persistent queue or automatic resumption.
+
+This MVP cache assumes the current single-replica Railway deployment. Multiple
+replicas would require shared health storage. Offline parser/shadow tooling can
+still call `runParseJob` without `requireAi`; the production API always sets
+`requireAi:true` and checks the successful AI marker independently. The legacy
+V1 rollback endpoint is unchanged and is not used by the V2 customer interface.
+
 **South African Bank Statement → Structured Data → CSV**
 
 YouScan V2 converts supported South African bank statements into structured, validated transaction data that can be reviewed and exported to CSV.

@@ -15,6 +15,10 @@ import { getDefaultReviewService } from "../review/defaultService.js";
 import { extractTextFromFile } from "../utils/extractTextFromFile.js";
 import { runParseJob } from "../orchestrator/runParseJob.js";
 import {
+  analysisAvailability, analysisUnavailableError, isProviderUnavailable,
+  ANALYSIS_UNAVAILABLE_CODE, ANALYSIS_UNAVAILABLE_MESSAGE,
+} from "../ai/availability.js";
+import {
   aggregateV2Transactions,
   toPublicV2FileResult,
 } from "./parseResponse.js";
@@ -40,6 +44,9 @@ function parseHttpError(code, message, status = 422) {
 }
 
 function ensureUsableParse(parseResult) {
+  if (parseResult?.error?.code === ANALYSIS_UNAVAILABLE_CODE) {
+    throw analysisUnavailableError();
+  }
   if (parseResult?.status === "unsupported") {
     throw parseHttpError(
       "V2_UNSUPPORTED_DOCUMENT",
@@ -77,6 +84,11 @@ function ensureUsableParse(parseResult) {
       "No transactions were extracted.",
       422
     );
+  }
+
+  if (parseResult?.aiCompleted !== true || !parseResult?.shadowAi?.ai ||
+      ["unavailable", "disabled", "rejected"].includes(parseResult?.shadowAi?.status)) {
+    throw analysisUnavailableError();
   }
 }
 
@@ -116,6 +128,12 @@ async function maybePersistReview({
 function sendError(res, error) {
   const status = Number(error?.status) || 500;
 
+  if (error?.code === ANALYSIS_UNAVAILABLE_CODE) {
+    return res.status(503).json({
+      error: ANALYSIS_UNAVAILABLE_CODE, message: ANALYSIS_UNAVAILABLE_MESSAGE,
+    });
+  }
+
   return res.status(status).json({
     error: error?.code || "V2_PARSE_ROUTE_FAILED",
     message:
@@ -133,8 +151,27 @@ export function createV2ParseRouter({
   runJob = runParseJob,
   getReviewService = getDefaultReviewService,
   recordExportHandler = recordExport,
+  availability = analysisAvailability,
 } = {}) {
   const router = express.Router();
+
+  router.get("/availability", authenticate, async (_req, res) => {
+    res.set("Cache-Control", "no-store");
+    try {
+      return res.json(await availability.getAvailability());
+    } catch (error) {
+      return sendError(res, analysisUnavailableError());
+    }
+  });
+
+  const requireAvailability = async (_req, res, next) => {
+    try {
+      await availability.assertAvailable();
+      next();
+    } catch (error) {
+      return sendError(res, analysisUnavailableError());
+    }
+  };
 
   /*
    * ============================================================
@@ -158,6 +195,7 @@ export function createV2ParseRouter({
     limiter,
     authenticate,
     checkAccess,
+    requireAvailability,
     upload.any(),
     async (req, res) => {
       try {
@@ -172,7 +210,8 @@ export function createV2ParseRouter({
         const internalResults = [];
 
         for (const file of files) {
-          const extraction = await extractText(file);
+          await availability.assertAvailable();
+          const extraction = await extractText(file, { requireAi: true });
 
           const parseResult = await runJob({
             file: {
@@ -181,6 +220,8 @@ export function createV2ParseRouter({
             },
             extractedText: extraction.text,
             extractionMeta: extraction.meta,
+            requireAi: true,
+            availability,
           });
 
           ensureUsableParse(parseResult);
@@ -231,6 +272,10 @@ export function createV2ParseRouter({
           billing,
         });
       } catch (error) {
+        if (isProviderUnavailable(error)) {
+          availability.recordFailure(error);
+          error = analysisUnavailableError();
+        }
         console.error(
           "V2 PARSE ROUTE ERROR:",
           error?.code || error?.message || "unknown"
