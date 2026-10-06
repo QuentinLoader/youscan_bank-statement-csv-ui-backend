@@ -1,6 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+test("production PDF vision auth and connection failures propagate to the availability gate", async () => {
+  for (const status of [401, 503, null]) {
+    await assert.rejects(() => extractTextFromFile(pdfFile(), {
+      requireAi: true,
+      pdfParseImpl: async () => ({ text: "", numpages: 1 }),
+      env: { YOUSCAN_V2_PDF_VISION_FALLBACK_ENABLED: "true", OPENAI_API_KEY: "synthetic-key" },
+      fetchImpl: async (_url, options) => {
+        assert.ok(options.signal);
+        if (!status) throw new Error("private network failure");
+        return { ok: false, status };
+      },
+    }), (error) => error.code === "V2_AI_PROVIDER_FAILED" && error.status === 503);
+  }
+});
+
 import {
   extractTextFromFile,
   hasUsefulPdfText,

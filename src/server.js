@@ -106,6 +106,7 @@ app.get("/health/routes", (req, res) => {
       ozowWebhook: "/ozow/webhook",
       parse: "/parse",
       v2Parse: "/api/v2/parse",
+      v2AnalysisAvailability: "/api/v2/parse/availability",
       v2Reviews: "/api/v2/reviews",
       adminCutoverReadiness: "/api/admin/cutover-readiness",
       auth: "/auth",

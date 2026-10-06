@@ -4,6 +4,82 @@ import test from "node:test";
 import express from "express";
 
 import { createV2ParseRouter } from "../api/parse.routes.js";
+import { createAnalysisAvailability, analysisUnavailableError, ANALYSIS_UNAVAILABLE_MESSAGE } from "../ai/availability.js";
+import { AiError } from "../ai/errors.js";
+
+test("availability endpoint authenticates, caches checks, and exposes only customer status", async () => {
+  let probes = 0;
+  const availability = createAnalysisAvailability({
+    probe: async () => { probes++; throw new AiError("V2_AI_PROVIDER_FAILED", "private", {
+      details: { status: 429, providerCode: "insufficient_quota" },
+    }); }, logger: () => {},
+  });
+  const h = await makeHarness({ availability });
+  try {
+    assert.equal((await fetch(`${h.url}/availability`)).status, 401);
+    assert.equal(probes, 0);
+    for (let i = 0; i < 3; i++) {
+      const response = await fetch(`${h.url}/availability`, { headers: headers() });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      const body = await response.json();
+      assert.equal(body.available, false);
+      assert.equal(body.message, ANALYSIS_UNAVAILABLE_MESSAGE);
+      assert.ok(!JSON.stringify(body).includes("insufficient_quota"));
+    }
+    assert.equal(probes, 1);
+  } finally { await h.close(); }
+});
+
+test("unavailable gate blocks before multipart parsing and before running jobs", async () => {
+  let jobs = 0;
+  const h = await makeHarness({
+    availability: { assertAvailable: async () => { throw analysisUnavailableError(); } },
+    runJob: async () => { jobs++; return completedResult(); },
+  });
+  try {
+    const response = await fetch(h.url, { method: "POST", headers: {
+      ...headers(), "Content-Type": "multipart/form-data; boundary=bad",
+    }, body: "malformed multipart body" });
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).message, ANALYSIS_UNAVAILABLE_MESSAGE);
+    assert.equal(jobs, 0);
+  } finally { await h.close(); }
+});
+
+test("production cannot return deterministic-only results even if an injected job claims completion", async () => {
+  const h = await makeHarness({ runJob: async () => ({ ...completedResult(), aiCompleted: false }) });
+  try {
+    const response = await fetch(h.url, { method: "POST", headers: headers(), body: oneFileForm() });
+    assert.equal(response.status, 503);
+    const body = await response.json();
+    assert.equal(body.transactions, undefined);
+    assert.equal(body.billing, undefined);
+  } finally { await h.close(); }
+});
+
+test("provider failure after health check trips gate and stops remaining files and later batches", async () => {
+  let jobs = 0;
+  const availability = createAnalysisAvailability({ probe: async () => {}, logger: () => {} });
+  const h = await makeHarness({ availability, runJob: async ({ requireAi }) => {
+    assert.equal(requireAi, true);
+    jobs++;
+    throw new AiError("V2_AI_PROVIDER_FAILED", "provider failed", {
+      details: { status: 401, providerCode: "invalid_api_key" },
+    });
+  } });
+  try {
+    const form = oneFileForm();
+    form.append("files", new Blob(["second"]), "second.pdf");
+    const response = await fetch(h.url, { method: "POST", headers: headers(), body: form });
+    assert.equal(response.status, 503);
+    assert.equal(jobs, 1);
+    assert.equal((await availability.getAvailability()).available, false);
+    const again = await fetch(h.url, { method: "POST", headers: headers(), body: oneFileForm() });
+    assert.equal(again.status, 503);
+    assert.equal(jobs, 1);
+  } finally { await h.close(); }
+});
 
 function canonical() {
   return {
@@ -32,6 +108,7 @@ function completedResult({
   return {
     jobId,
     status: "completed",
+    aiCompleted: true,
     classification: {
       documentType: "bank_statement",
       documentSubtype: "fnb",
@@ -57,8 +134,9 @@ function completedResult({
           mode: "shadow",
           status: "differences",
           authoritativeSource: "deterministic",
+          ai: { provider: "openai", requestId: "synthetic-request" },
         }
-      : null,
+      : { status: "exact_match", ai: { provider: "openai", requestId: "synthetic-request" } },
     aiDecision: proposal
       ? {
           outcome: "review_ai_difference",
@@ -106,6 +184,10 @@ async function makeHarness({
   getReviewService,
   recordExportHandler,
   checkAccess: suppliedCheckAccess,
+  availability = {
+    getAvailability: async () => ({ available: true }),
+    assertAvailable: async () => {}, recordFailure: () => {},
+  },
 } = {}) {
   const authenticate = (req, res, next) => {
     if (
@@ -163,6 +245,7 @@ async function makeHarness({
       authenticate,
       checkAccess,
       limiter,
+      availability,
 
       extractText: async () => ({
         text: "synthetic",
