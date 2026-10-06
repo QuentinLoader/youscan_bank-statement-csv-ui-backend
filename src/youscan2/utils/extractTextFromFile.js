@@ -2,11 +2,12 @@
  * YouScan 2.0
  * File text extraction utility
  *
- * Normal PDFs remain deterministic through pdf-parse.
- * Image-only/scanned PDFs may use the optional OpenAI PDF vision fallback.
+ * Production PDFs are read by AI from full pages, including image-only cells.
+ * Offline tools can still use native PDF text and optional scan recovery.
  */
 
 import pdfParse from "pdf-parse";
+import { AI_EXTRACTION_FAILED_MESSAGE } from "../ai/validationDiagnostics.js";
 
 const MIN_USEFUL_PDF_CHARS = 120;
 const MIN_USEFUL_ALPHANUMERIC_CHARS = 60;
@@ -17,7 +18,7 @@ const DEFAULT_VISION_RETRY_MAX_MS = 30000;
 const MAX_RETRY_AFTER_MS = 60000;
 
 const PDF_VISION_PROMPT = `
-Transcribe this South African bank statement accurately for downstream deterministic parsing.
+Transcribe this South African bank statement accurately for downstream AI extraction.
 
 Rules:
 - Return plain text only.
@@ -26,6 +27,7 @@ Rules:
 - Preserve bank name, account/product name, account number, statement number,
   statement period, statement date, opening balance and closing balance.
 - Preserve all transaction rows in their original order.
+- Read the visible page images as well as the text layer. Some PDFs store transaction descriptions as images even when dates and amounts are selectable text.
 - Keep each transaction on one logical line wherever possible.
 - Preserve transaction dates, descriptions, references, amounts, balances,
   bank charges and Cr/Dr suffixes exactly as visible.
@@ -35,7 +37,7 @@ Rules:
 - If text is genuinely unreadable, write [UNREADABLE] rather than guessing.
 - Include turnover / transaction-count totals when present.
 
-The output will be consumed by a deterministic bank-statement parser, so
+The output will be consumed by an AI bank-statement extractor, so
 accuracy and faithful transcription are more important than presentation.
 `.trim();
 
@@ -584,6 +586,7 @@ async function recoverPdfTextWithVision({
   requireAi = false,
 }) {
   const fallbackEnabled =
+    requireAi ||
     enabled(
       env.YOUSCAN_V2_PDF_VISION_FALLBACK_ENABLED
     );
@@ -602,6 +605,7 @@ async function recoverPdfTextWithVision({
     ).trim();
 
   if (!apiKey) {
+    if (requireAi) throw createVisionServiceError("V2_AI_CONFIG_INVALID");
     console.warn(
       "V2 PDF vision fallback unavailable: API key not configured"
     );
@@ -613,6 +617,7 @@ async function recoverPdfTextWithVision({
     typeof fetchImpl !==
     "function"
   ) {
+    if (requireAi) throw createVisionServiceError("V2_AI_CONFIG_INVALID");
     console.warn(
       "V2 PDF vision fallback unavailable: fetch not configured"
     );
@@ -699,7 +704,9 @@ async function recoverPdfTextWithVision({
 
   const boundedFetch = requireAi
     ? (url, options) => fetchImpl(url, {
-        ...options, signal: AbortSignal.timeout(20_000),
+        ...options, signal: AbortSignal.timeout(integerSetting(
+          env.YOUSCAN_V2_AI_TIMEOUT_MS, 20_000, { max: 120_000 }
+        )),
       })
     : fetchImpl;
 
@@ -1003,10 +1010,14 @@ export async function extractTextFromFile(
       );
 
   if (isPdf) {
-    const result =
-      await pdfParseImpl(
-        file.buffer
-      );
+    let result;
+    try {
+      result = await pdfParseImpl(file.buffer);
+    } catch (error) {
+      if (!requireAi) throw error;
+      // Native reading is metadata-only in production. AI reads the full PDF.
+      result = { text: "", numpages: null, info: null };
+    }
 
     const nativeText =
       normalizeText(
@@ -1014,10 +1025,11 @@ export async function extractTextFromFile(
       );
 
     /*
-     * Normal digitally-generated PDF:
-     * no OpenAI request.
+     * Native reading remains available to offline tooling. Customer PDFs must
+     * be read visually: useful text length cannot detect missing image cells.
      */
     if (
+      !requireAi &&
       hasUsefulPdfText(
         nativeText
       )
@@ -1048,7 +1060,7 @@ export async function extractTextFromFile(
     }
 
     /*
-     * Scanned/image-only PDF.
+     * Production reads all PDF pages with AI; offline tools recover scans.
      */
     const recovery =
       await recoverPdfTextWithVision({
@@ -1135,6 +1147,13 @@ export async function extractTextFromFile(
             recovery.rateLimitRetries,
         },
       };
+    }
+
+    if (requireAi) {
+      const error = new Error(AI_EXTRACTION_FAILED_MESSAGE);
+      error.code = "V2_AI_INVALID_RESPONSE";
+      error.status = 422;
+      throw error;
     }
 
     /*
