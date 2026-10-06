@@ -9,10 +9,14 @@ import { finalizeParseJob } from "./finalizeParseJob.js";
 const bankAliases = new Map([
   ["absa bank", "absa_statement"],
   ["first national bank", "fnb_statement"],
+  ["capitec bank", "capitec_statement"],
+  ["capitec bank limited", "capitec_statement"],
+  ["capitec bank ltd", "capitec_statement"],
+  ["capitec bank ltd.", "capitec_statement"],
   ["discovery", "discovery_statement"],
   ["standard bank south africa", "standard_bank_statement"],
 ]);
-const normalizeBank = (name) => String(name || "").trim().toLowerCase();
+const normalizeBank = (name) => String(name || "").trim().replace(/\s+/g, " ").toLowerCase();
 
 // The production path never invokes a bank parser or compares against its data.
 // All displayed values come from this AI candidate; validation only flags issues.
@@ -32,9 +36,16 @@ export async function runAiParseJob({ job, file, extractedText, extractionMeta, 
     throw new AiError("V2_AI_ANALYSIS_REJECTED", "AI extraction could not validate this document.");
   }
   const bank = normalizeBank(assessment.canonical.bankName);
-  const subtype = V2_RECOGNIZED_BANK_SUBTYPES.find(
+  const canonicalSubtype = V2_RECOGNIZED_BANK_SUBTYPES.find(
     (value) => normalizeBank(getBankNameForSubtype(value)) === bank,
-  ) || bankAliases.get(bank);
+  );
+  const subtype = canonicalSubtype || bankAliases.get(bank);
+  // Log only registry labels, never the AI-returned text or statement fields.
+  console.info("V2 AI BANK RECOGNITION:", JSON.stringify({
+    documentSubtype: subtype || "unknown",
+    reason: canonicalSubtype ? "canonical_name" : subtype ? "known_alias" : "unrecognized_name",
+    requestId: ai.meta?.requestId || null,
+  }));
   const classification = {
     documentType: "bank_statement", documentSubtype: subtype || "unknown",
     supported: Boolean(subtype), confidence: ai.data.bankName.confidence,
