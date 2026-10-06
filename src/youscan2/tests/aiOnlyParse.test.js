@@ -91,6 +91,57 @@ test("invalid AI output yields no statement even where the old FNB parser could 
   assert.equal(result.aiCompleted, undefined);
 });
 
+// Synthetic statement only: a turnover summary can exclude a zero-amount row.
+function withAccruedChargeRow() {
+  const candidate = makeValidAiBankStatementCandidate();
+  const line = '02/07/2026 ACCRUED CHARGE NOTICE Amount=0.00 Balance=1400.00Cr Accrued Bank Charges=12.00';
+  const field = value => ({ value, confidence: 0.99, evidence: value === null ? [] : [line] });
+  candidate.transactions.splice(2, 0, {
+    date: field('02/07/2026'), description: field('ACCRUED CHARGE NOTICE'),
+    amount: field(0), fee: field(null), balance: field(1400),
+  });
+  candidate.transactionCount = 4;
+  const text = AI_BANK_STATEMENT_SOURCE_TEXT.replace('03/07/2026 MONTHLY FEE', `${line}\n03/07/2026 MONTHLY FEE`)
+    + '\nTurnover for Statement Period: No. Credit Transactions 1; No. Debit Transactions 2';
+  return { candidate, text };
+}
+
+test('FNB zero-amount row remains AI data without deducting an accrued charge or adopting the turnover count', async () => {
+  const { candidate, text } = withAccruedChargeRow();
+  const result = await parse(candidate, text);
+  assert.equal(result.status, 'needs_review');
+  assert.equal(result.authoritativeSource, 'ai');
+  assert.equal(result.result.data.transactions.length, 4);
+  assert.deepEqual(result.result.data.transactions[2], {
+    date: '02/07/2026', description: 'ACCRUED CHARGE NOTICE', amount: 0, balance: 1400,
+  });
+  assert.equal(result.result.data.closingBalance, 1350);
+  assert.deepEqual(result.result.issues.map(issue => issue.issueType), ['canonical_zero_amount']);
+});
+
+test('FNB turnover count used for a different number of AI rows still fails without count repair', async () => {
+  const { candidate, text } = withAccruedChargeRow();
+  candidate.transactionCount = 3;
+  const result = await parse(candidate, text);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error.code, 'V2_AI_INVALID_RESPONSE');
+  assert.equal(result.result, null);
+  assert.equal(candidate.transactionCount, 3);
+});
+
+test('an AI fee incorrectly deducted from an accrued-charge row remains a reconciliation warning', async () => {
+  const { candidate, text } = withAccruedChargeRow();
+  candidate.transactions[2].fee = {
+    value: -12, confidence: 0.99, evidence: ['Accrued Bank Charges=12.00'],
+  };
+  const result = await parse(candidate, text);
+  assert.equal(result.status, 'needs_review');
+  assert.equal(result.result.data.transactions[2].amount, -12);
+  assert.equal(result.result.data.transactions[2].balance, 1400);
+  assert.equal(result.result.data.closingBalance, 1350);
+  assert.ok(result.result.issues.some(issue => issue.issueType === 'statement_total_reconciliation_mismatch'));
+});
+
 function withFee(fee = -6, payment = -100) {
   const candidate = makeValidAiBankStatementCandidate();
   const delta = fee + payment + 100;
