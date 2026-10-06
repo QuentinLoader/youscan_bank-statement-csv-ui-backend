@@ -1,5 +1,11 @@
 # YouScan V2
 
+## Authoritative production path
+
+`youscan-v2-revival` is the deployed backend branch. The customer-facing V2 path is AI-only: OpenAI reads the statement, produces the structured candidate, and supplies every displayed, reconciled and exported value. Deterministic bank parsers remain offline/legacy tooling and are not a fallback or a competing source of truth for V2.
+
+The production source of truth is the code on `youscan-v2-revival` plus its lockfile and Railway environment configuration. Older historical sections below describe retired or offline workflows; they do not define current V2 behaviour.
+
 ## Required AI availability gate
 
 The production `POST /api/v2/parse` endpoint requires successful OpenAI
@@ -71,7 +77,7 @@ V1 rollback endpoint is unchanged and is not used by the V2 customer interface.
 
 YouScan V2 converts supported South African bank statements into structured, validated transaction data that can be reviewed and exported to CSV.
 
-The system combines deterministic bank-specific extraction, balance reconciliation, document classification, controlled AI assistance, human review, authentication, commercial usage controls, billing, and administration in a single production workflow.
+The system combines AI extraction, balance reconciliation, human review, authentication, commercial usage controls, billing, and administration in a single production workflow.
 
 ---
 
