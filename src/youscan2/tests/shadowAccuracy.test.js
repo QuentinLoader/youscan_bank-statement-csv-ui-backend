@@ -9,7 +9,7 @@ import {
   compareAiToDeterministicBankStatement,
   scoreBankStatementAgainstReference,
 } from "../ai/extraction/index.js";
-import { runParseJob } from "../orchestrator/runParseJob.js";
+
 import {
   ABSA_EXPECTED_NORMALIZED,
   ABSA_STATEMENT_FIXTURE_TEXT,
@@ -249,37 +249,6 @@ test("Batch 13 cross-bank report remains privacy-safe", () => {
   ]) {
     assert.equal(serialized.includes(secret), false);
   }
-});
-
-test("Batch 13 deterministic engine remains 100% accurate against all six labelled regression fixtures", async () => {
-  const scores = [];
-
-  for (const bankCase of BANK_CASES) {
-    const result = await runParseJob({
-      file: { originalname: bankCase.fileName, mimetype: "application/pdf" },
-      extractedText: bankCase.text,
-      extractionMeta: { sourceType: "batch13-labelled-fixture" },
-    });
-
-    assert.ok(["completed", "needs_review"].includes(result.status));
-    assert.ok(result.result?.data);
-
-    scores.push(
-      scoreBankStatementAgainstReference({
-        candidateCanonical: result.result.data,
-        referenceCanonical: bankCase.expected,
-        engine: "deterministic-v2",
-        bankName: bankCase.bankName,
-      })
-    );
-  }
-
-  const report = aggregateBankStatementAccuracy(scores);
-  assert.equal(report.sampleCount, 6);
-  assert.equal(report.exactMatchCount, 6);
-  assert.equal(report.signals.accuracy, 1);
-  assert.equal(report.fieldAccuracy.transactionAmount.accuracy, 1);
-  assert.equal(report.fieldAccuracy.transactionBalance.accuracy, 1);
 });
 
 test("Batch 13 multiple disagreements are grouped by category and severity", () => {

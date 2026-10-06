@@ -80,7 +80,7 @@ test("required AI extraction failure trips health instead of becoming a document
   const result = await runParseJob({
     file: { originalname: "unknown.txt" }, extractedText: "Unclassified document text",
     requireAi: true, availability,
-    shadowAiOptions: { config, provider: { name: "mock", generateStructured: async () => { throw new AiError("V2_AI_PROVIDER_FAILED", "auth", { details: { status: 401 } }); } } },
+    aiOptions: { config, provider: { name: "mock", generateStructured: async () => { throw new AiError("V2_AI_PROVIDER_FAILED", "auth", { details: { status: 401 } }); } } },
   });
   assert.equal(result.error.code, "V2_AI_UNAVAILABLE");
   assert.equal(result.result, null);
@@ -98,7 +98,7 @@ for (const failure of [
     const result = await runParseJob({
       file: { originalname: "fnb.txt" }, extractedText: FNB_STATEMENT_FIXTURE_TEXT,
       requireAi: true, availability,
-      shadowAiOptions: { config, provider: {
+      aiOptions: { config, provider: {
         name: "mock", generateStructured: async () => { calls++; throw failure; },
       } },
     });
@@ -121,11 +121,11 @@ test("disabled required AI fails closed; successful AI retains the normal result
   const availability = createAnalysisAvailability({ probe: async () => {}, logger: () => {} });
   const args = { file: { originalname: "fnb.txt" }, extractedText: FNB_STATEMENT_FIXTURE_TEXT,
     requireAi: true, availability };
-  const disabled = await runParseJob({ ...args, shadowAiOptions: { config: { ...config, enabled: false } } });
+  const disabled = await runParseJob({ ...args, aiOptions: { config: { ...config, enabled: false } } });
   assert.equal(disabled.status, "failed");
   assert.equal(disabled.result, null);
   const healthy = createAnalysisAvailability({ probe: async () => {}, logger: () => {} });
-  const success = await runParseJob({ ...args, availability: healthy, shadowAiOptions: {
+  const success = await runParseJob({ ...args, availability: healthy, aiOptions: {
     config, provider: { name: "mock", generateStructured: async () => ({
       content: JSON.stringify(makeShadowAiEnvelope()), requestId: "req-success",
     }) },

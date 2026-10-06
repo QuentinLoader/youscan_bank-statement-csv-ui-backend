@@ -20,7 +20,6 @@ function readyEnv() {
     YOUSCAN_V2_AI_PROVIDER: "openai",
     YOUSCAN_V2_AI_MODEL: "gpt-5.6",
     OPENAI_API_KEY: "synthetic-openai",
-    YOUSCAN_V2_AI_CLASSIFIER_ENABLED: "true",
     YOUSCAN_V2_AI_EXTRACTION_ENABLED: "true",
   };
 }
@@ -51,6 +50,13 @@ test("Batch 19 cutover configuration fails closed without AI extraction or a val
   assert.equal(report.ready, false);
   assert.equal(report.checks.find((item) => item.name === "ai_extraction_enabled").ok, false);
   assert.equal(report.checks.find((item) => item.name === "review_encryption_key").ok, false);
+});
+
+test("production readiness requires the supported AI provider without a retired classifier flag", () => {
+  const env = readyEnv();
+  assert.equal(evaluateCutoverConfiguration(env).ready, true);
+  env.YOUSCAN_V2_AI_PROVIDER = "disabled";
+  assert.equal(evaluateCutoverConfiguration(env).ready, false);
 });
 
 test("Batch 19 cutover readiness requires all existing commercial and V2 review tables", async () => {

@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "test": "node --test src/youscan2/tests/*.test.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

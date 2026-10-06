@@ -19,7 +19,6 @@ import {
   getAiShadowInternalCanonical,
   runAiBankStatementShadow,
 } from "../ai/extraction/runShadowExtraction.js";
-import { runParseJob } from "../orchestrator/runParseJob.js";
 import { DOCUMENT_SUBTYPES } from "../registry/documentTypes.js";
 import {
   FNB_EXPECTED_NORMALIZED,
@@ -422,39 +421,4 @@ test("Batch 15 rejects duplicate decisions for the same proposal item", async ()
 test("Batch 15 public extraction API deliberately exposes no apply/merge function", () => {
   assert.equal("applyAiCorrectionProposal" in extractionApi, false);
   assert.equal("mergeAiCorrectionProposal" in extractionApi, false);
-});
-
-test("Batch 15 runParseJob attaches a review proposal for a safe AI description difference without changing canonical data", async () => {
-  const provider = mockProvider(
-    makeShadowAiEnvelope(makeFnbShadowCandidate({ omitReferenceFromDescription: true }))
-  );
-  const result = await runParseJob({
-    file: { originalname: "fnb-july-2026.pdf", mimetype: "application/pdf" },
-    extractedText: FNB_STATEMENT_FIXTURE_TEXT,
-    shadowAiOptions: { config: shadowConfig(), provider },
-  });
-
-  assert.equal(result.status, "completed");
-  assert.deepEqual(result.result.data, FNB_EXPECTED_NORMALIZED);
-  assert.equal(result.aiDecision.outcome, AI_DECISION_OUTCOMES.REVIEW_AI_DIFFERENCE);
-  assert.equal(result.aiCorrectionProposal.itemCount, 1);
-  assert.equal(result.aiCorrectionProposal.items[0].field, "description");
-  assert.equal(result.aiCorrectionProposal.applicationAuthorized, false);
-  assert.equal(result.aiCorrectionProposal.applied, false);
-});
-
-test("Batch 15 runParseJob creates no correction proposal when AI exactly confirms deterministic data", async () => {
-  const result = await runParseJob({
-    file: { originalname: "fnb-july-2026.pdf", mimetype: "application/pdf" },
-    extractedText: FNB_STATEMENT_FIXTURE_TEXT,
-    shadowAiOptions: {
-      config: shadowConfig(),
-      provider: mockProvider(makeShadowAiEnvelope()),
-    },
-  });
-
-  assert.equal(result.status, "completed");
-  assert.equal(result.aiDecision.outcome, AI_DECISION_OUTCOMES.DETERMINISTIC_CONFIRMED);
-  assert.equal(result.aiCorrectionProposal, null);
-  assert.deepEqual(result.result.data, FNB_EXPECTED_NORMALIZED);
 });

@@ -1,7 +1,7 @@
 /**
  * YouScan V2 production parsing API.
  *
- * V1 /parse remains mounted separately as rollback code during cutover.
+ * The only production extraction endpoint. Retired V1 is preserved in Git tags.
  */
 
 import express from "express";

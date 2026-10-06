@@ -11,7 +11,6 @@ import {
   projectAiBankStatementCandidate,
   runAiBankStatementShadow,
 } from "../ai/extraction/index.js";
-import { runParseJob } from "../orchestrator/runParseJob.js";
 import { DOCUMENT_SUBTYPES } from "../registry/documentTypes.js";
 import { FNB_EXPECTED_NORMALIZED, FNB_STATEMENT_FIXTURE_TEXT } from "./fixtures/fnbStatement.fixture.js";
 import {
@@ -291,66 +290,4 @@ test("Batch 12 provider failure is isolated from the deterministic result and do
   assert.equal(report.errorCode, "V2_AI_PROVIDER_FAILED");
   assert.equal(JSON.stringify(report).includes("62123456789"), false);
   assert.equal(JSON.stringify(report).includes("secret provider body"), false);
-});
-
-test("Batch 12 runParseJob attaches an exact shadow report without changing deterministic output", async () => {
-  const provider = mockProvider(makeShadowAiEnvelope());
-  const result = await runParseJob({
-    file: { originalname: "fnb-july-2026.pdf", mimetype: "application/pdf" },
-    extractedText: FNB_STATEMENT_FIXTURE_TEXT,
-    extractionMeta: { sourceType: "test" },
-    shadowAiOptions: {
-      config: shadowConfig(),
-      provider,
-    },
-  });
-
-  assert.equal(result.status, "completed");
-  assert.deepEqual(result.result.data, FNB_EXPECTED_NORMALIZED);
-  assert.equal(result.shadowAi.status, AI_SHADOW_STATUSES.EXACT_MATCH);
-  assert.equal(result.shadowAi.aiCanAffectResult, false);
-  assert.equal(provider.calls, 1);
-  const shadowSerialized = JSON.stringify(result.shadowAi);
-  assert.equal(shadowSerialized.includes("62123456789"), false);
-  assert.equal(shadowSerialized.includes("ACME TRADING"), false);
-  assert.equal(shadowSerialized.includes("Coffee Shop"), false);
-});
-
-test("Batch 12 runParseJob keeps deterministic completed status when AI finds a shadow difference", async () => {
-  const provider = mockProvider(
-    makeShadowAiEnvelope(makeFnbShadowCandidate({ omitReferenceFromDescription: true }))
-  );
-  const result = await runParseJob({
-    file: { originalname: "fnb-july-2026.pdf", mimetype: "application/pdf" },
-    extractedText: FNB_STATEMENT_FIXTURE_TEXT,
-    shadowAiOptions: {
-      config: shadowConfig(),
-      provider,
-    },
-  });
-
-  assert.equal(result.status, "completed");
-  assert.deepEqual(result.result.data, FNB_EXPECTED_NORMALIZED);
-  assert.equal(result.shadowAi.status, AI_SHADOW_STATUSES.DIFFERENCES);
-  assert.equal(result.shadowAi.comparison.exactMatch, false);
-  assert.equal(result.shadowAi.aiCanAffectResult, false);
-});
-
-test("Batch 12 runParseJob remains completed when shadow AI provider is unavailable", async () => {
-  const provider = mockProvider(() => {
-    throw new Error("provider down");
-  });
-  const result = await runParseJob({
-    file: { originalname: "fnb-july-2026.pdf", mimetype: "application/pdf" },
-    extractedText: FNB_STATEMENT_FIXTURE_TEXT,
-    shadowAiOptions: {
-      config: shadowConfig(),
-      provider,
-    },
-  });
-
-  assert.equal(result.status, "completed");
-  assert.deepEqual(result.result.data, FNB_EXPECTED_NORMALIZED);
-  assert.equal(result.shadowAi.status, AI_SHADOW_STATUSES.UNAVAILABLE);
-  assert.equal(result.shadowAi.aiCanAffectResult, false);
 });

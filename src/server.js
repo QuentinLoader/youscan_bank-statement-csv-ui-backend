@@ -15,7 +15,6 @@ import ozowWebhook from "./webhooks/ozow.webhook.js";
 import ozowPaymentRoutes from "./routes/ozow.payment.routes.js";
 import authRoutes from "./routes/auth.routes.js";
 import usageRoutes from "./routes/usage.routes.js";
-import { router as parseRoute } from "./routes/parse.js";
 import { PRICING } from "./config/pricing.js";
 import adminRoutes from "./routes/admin.js";
 import youscan2ReviewRoutes from "./youscan2/review/review.routes.js";
@@ -85,7 +84,6 @@ app.use("/billing", ozowPaymentRoutes);
 // Core Logic Routes
 app.use("/auth", authRoutes);
 app.use("/usage", usageRoutes);
-app.use("/parse", parseRoute);
 app.use("/api/v2/parse", youscan2ParseRoutes);
 app.use("/api/v2/reviews", youscan2ReviewRoutes);
 
@@ -104,7 +102,6 @@ app.get("/health/routes", (req, res) => {
       billingCreateOzowPayment: "/billing/create-ozow-payment",
       billingStatus: "/billing/status",
       ozowWebhook: "/ozow/webhook",
-      parse: "/parse",
       v2Parse: "/api/v2/parse",
       v2AnalysisAvailability: "/api/v2/parse/availability",
       v2Reviews: "/api/v2/reviews",

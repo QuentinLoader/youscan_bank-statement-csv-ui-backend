@@ -11,7 +11,7 @@ const config = getAiConfig({ YOUSCAN_V2_AI_ENABLED: "true", YOUSCAN_V2_AI_EXTRAC
   YOUSCAN_V2_AI_PROVIDER: "openai", YOUSCAN_V2_AI_MODEL: "synthetic" });
 function parse(candidate = makeValidAiBankStatementCandidate(), text = AI_BANK_STATEMENT_SOURCE_TEXT, envelope = {}) {
   return runParseJob({ file: { originalname: "wrong-bank-absa.pdf" }, extractedText: text,
-    requireAi: true,
+    requireAi: false, // A stale caller cannot opt into a legacy extraction path.
     availability: createAnalysisAvailability({ probe: async () => {}, logger: () => {} }),
     aiOptions: { config, provider: { name: "mock", generateStructured: async () => ({
       content: JSON.stringify(makeShadowAiEnvelope(candidate, envelope)), requestId: "synthetic",
@@ -19,7 +19,7 @@ function parse(candidate = makeValidAiBankStatementCandidate(), text = AI_BANK_S
   });
 }
 
-for (const bank of ["FNB", "ABSA", "Standard Bank", "Absa Bank Limited", "Absa Bank (Ltd.)", "Absa Bank South Africa",
+for (const bank of ["FNB", "ABSA", "Standard Bank", "Nedbank", "Discovery Bank", "Absa Bank Limited", "Absa Bank (Ltd.)", "Absa Bank South Africa",
   "First National Bank (FNB)", "FNB (First National Bank)",
   "First National Bank - a division of FirstRand Bank Limited", "First National Bank, a division of FirstRand Bank Ltd."]) {
   test(`${bank}: V2 production returns exclusively AI fields, without parser data or comparison`, async () => {

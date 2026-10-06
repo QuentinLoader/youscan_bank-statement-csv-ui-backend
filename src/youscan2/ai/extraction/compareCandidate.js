@@ -10,7 +10,7 @@ import {
   formatDateParts,
   isValidCalendarDateParts,
   parseStatementPeriodDate,
-} from "../../extractor/shared/dates.js";
+} from "../../utils/dates.js";
 
 export const AI_SHADOW_COMPARISON_STATUSES = Object.freeze({
   EXACT_MATCH: "exact_match",

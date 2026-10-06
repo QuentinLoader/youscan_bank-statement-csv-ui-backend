@@ -1081,38 +1081,3 @@ test(
     }
   }
 );
-
-test(
-  "Batch 17 removes the unauthenticated debug-text V2 test route from legacy /parse",
-  () => {
-    const source =
-      fs.readFileSync(
-        new URL(
-          "../../routes/parse.js",
-          import.meta.url
-        ),
-        "utf8"
-      );
-
-    assert.equal(
-      source.includes(
-        "test-youscan2"
-      ),
-      false
-    );
-
-    assert.equal(
-      source.includes(
-        "debugTextPreview"
-      ),
-      false
-    );
-
-    assert.equal(
-      source.includes(
-        "parseStatement"
-      ),
-      true
-    );
-  }
-);

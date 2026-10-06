@@ -7,7 +7,6 @@ import {
   AI_SHADOW_STATUSES,
   evaluateAiDecisionPolicy,
 } from "../ai/extraction/index.js";
-import { runParseJob } from "../orchestrator/runParseJob.js";
 import {
   FNB_EXPECTED_NORMALIZED,
   FNB_STATEMENT_FIXTURE_TEXT,
@@ -255,38 +254,4 @@ test("Batch 14 advisory report is privacy-safe and excludes deterministic issue 
   assert.equal(serialized.includes("ACME TRADING"), false);
   assert.deepEqual(decision.reviewTargets.metadataFields, ["accountNumber"]);
   assert.deepEqual(decision.deterministic.issueTypes, ["missing_account_number"]);
-});
-
-test("Batch 14 runParseJob attaches deterministic_confirmed advisory after exact shadow match", async () => {
-  const provider = mockProvider(makeShadowAiEnvelope());
-  const result = await runParseJob({
-    file: { originalname: "fnb-july-2026.pdf", mimetype: "application/pdf" },
-    extractedText: FNB_STATEMENT_FIXTURE_TEXT,
-    shadowAiOptions: { config: shadowConfig(), provider },
-  });
-
-  assert.equal(result.status, "completed");
-  assert.deepEqual(result.result.data, FNB_EXPECTED_NORMALIZED);
-  assert.equal(result.aiDecision.outcome, AI_DECISION_OUTCOMES.DETERMINISTIC_CONFIRMED);
-  assert.equal(result.aiDecision.aiCanAutoCorrect, false);
-  assert.equal(result.aiDecision.authoritativeSource, "deterministic");
-});
-
-test("Batch 14 runParseJob exposes a review target for an AI description difference without changing data", async () => {
-  const provider = mockProvider(
-    makeShadowAiEnvelope(makeFnbShadowCandidate({ omitReferenceFromDescription: true }))
-  );
-  const result = await runParseJob({
-    file: { originalname: "fnb-july-2026.pdf", mimetype: "application/pdf" },
-    extractedText: FNB_STATEMENT_FIXTURE_TEXT,
-    shadowAiOptions: { config: shadowConfig(), provider },
-  });
-
-  assert.equal(result.status, "completed");
-  assert.deepEqual(result.result.data, FNB_EXPECTED_NORMALIZED);
-  assert.equal(result.aiDecision.outcome, AI_DECISION_OUTCOMES.REVIEW_AI_DIFFERENCE);
-  assert.deepEqual(result.aiDecision.reviewTargets.transactionRows, [
-    { rowIndex: 2, fields: ["description"] },
-  ]);
-  assert.equal(result.aiDecision.aiCanAutoCorrect, false);
 });

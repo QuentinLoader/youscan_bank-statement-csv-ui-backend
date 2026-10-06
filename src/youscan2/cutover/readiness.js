@@ -45,10 +45,9 @@ export function evaluateCutoverConfiguration(env = process.env, pricing = PRICIN
     check("review_persistence_enabled", enabled(env.YOUSCAN_V2_REVIEW_PERSISTENCE_ENABLED)),
     check("review_encryption_key", validReviewKey(env.YOUSCAN_V2_REVIEW_ENCRYPTION_KEY)),
     check("ai_enabled", enabled(env.YOUSCAN_V2_AI_ENABLED)),
-    check("ai_provider", present(env.YOUSCAN_V2_AI_PROVIDER) && String(env.YOUSCAN_V2_AI_PROVIDER).trim().toLowerCase() !== "disabled"),
+    check("ai_provider", String(env.YOUSCAN_V2_AI_PROVIDER || "").trim().toLowerCase() === "openai"),
     check("ai_model", present(env.YOUSCAN_V2_AI_MODEL)),
     check("ai_api_key", present(env.YOUSCAN_V2_OPENAI_API_KEY) || present(env.OPENAI_API_KEY)),
-    check("ai_classifier_enabled", enabled(env.YOUSCAN_V2_AI_CLASSIFIER_ENABLED)),
     check("ai_extraction_enabled", enabled(env.YOUSCAN_V2_AI_EXTRACTION_ENABLED)),
   ];
 

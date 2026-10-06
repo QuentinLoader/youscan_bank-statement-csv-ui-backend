@@ -2,9 +2,8 @@
  * YouScan V2
  * Accuracy-first safety assessment for AI bank-statement extraction.
  *
- * Batch 11 never returns an "accepted" disposition. The best possible result
- * is ELIGIBLE_FOR_COMPARISON so a later batch must explicitly compare AI and
- * deterministic parser output before any merge can be considered.
+ * Checks AI evidence, confidence, schema and arithmetic without replacing
+ * extracted values. Production uses this candidate as its sole data source.
  */
 
 import { validateBankStatement } from "../../plugins/bankStatement/bankStatement.validator.js";

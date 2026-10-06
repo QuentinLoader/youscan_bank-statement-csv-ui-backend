@@ -12,17 +12,9 @@ test("runParseJob logs safe stage-aware diagnostics for an uncoded failure", asy
     capturedLogs.push(args);
   };
 
-  const classificationOptions = new Proxy(
-    {},
-    {
-      ownKeys() {
-        throw new Error(
-          "Synthetic diagnostic failure 123456 user@example.com"
-        );
-      },
-    }
-  );
-
+  const availability = {
+    assertAvailable: async () => { throw new Error("Synthetic diagnostic failure 123456 user@example.com"); },
+  };
   let result;
 
   try {
@@ -32,7 +24,7 @@ test("runParseJob logs safe stage-aware diagnostics for an uncoded failure", asy
         mimetype: "application/pdf",
       },
       extractedText: "synthetic test input",
-      classificationOptions,
+      availability,
     });
   } finally {
     console.error = originalConsoleError;
@@ -49,7 +41,7 @@ test("runParseJob logs safe stage-aware diagnostics for an uncoded failure", asy
 
   const diagnostic = JSON.parse(diagnosticLog[1]);
 
-  assert.equal(diagnostic.stage, "classification");
+  assert.equal(diagnostic.stage, "ai_extraction");
   assert.equal(diagnostic.code, "V2_PARSE_FAILED");
   assert.equal(diagnostic.name, "Error");
   assert.equal(diagnostic.subtype, null);
