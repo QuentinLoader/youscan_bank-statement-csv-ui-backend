@@ -41,6 +41,10 @@ Confirm:
 
 Live financial correctness remains a separate acceptance gate from mocked tests and health checks. Do not mark a specimen verified until it has been compared privately with the original.
 
-## Known limits
+## Renewal acceptance
+
+Check monthly and annual warnings at seven days, three days and exact expiry. Expired subscriptions retain their plan/history and receive no fresh FREE allowance. Confirm that the current-plan renewal button creates the normal Ozow form, an unsuccessful/pending payment changes no entitlement, and only the signed successful webhook extends the term. Replay must not extend it again. PAYG remains once-off. Payment return must stay pending until the matching owned transaction is confirmed. Use synthetic automated coverage; any real payment requires deliberate customer acceptance.
+
+## Other known limits
 
 AI may still omit or misread fields. Unsupported/malformed documents fail safely. Health is process-local. The browser is not a durable job queue. The frontend retains pre-existing repo-wide lint debt, a bundle-size warning and stale Browserslist data; focused changed-file lint, typecheck, tests and build are the current release checks. Dependency upgrades need their own compatibility review.

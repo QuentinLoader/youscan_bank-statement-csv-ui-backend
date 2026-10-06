@@ -1,5 +1,13 @@
 # Change history
 
+## 6 October 2026 — Manual renewal and expiry
+
+- Monthly and annual pricing now identifies manual payment renewal; prices are unchanged.
+- Billing status fails closed for missing/invalid expiry or inactive subscription status, matching parse access checks. Expired subscriptions retain their plan/history and receive no FREE reset.
+- Successful same-plan early renewal preserves paid time and replenishes Monthly 25 only via the verified webhook. Replayed/late callbacks cannot downgrade or reapply a confirmed payment.
+- Added an authenticated, ownership-scoped payment confirmation endpoint for reliable browser return status.
+- Added renewal, expiry, payment ownership and webhook replay tests and commercial/support documentation. No database migration is required.
+
 ## 6 October 2026 — Dependency security maintenance
 
 - Applied compatible lockfile updates for the HTTP, rate-limit and email dependencies; no major-version upgrades or extraction changes.

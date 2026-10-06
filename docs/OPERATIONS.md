@@ -46,6 +46,14 @@ Correlate request IDs, timestamps and `POST /api/v2/parse` statuses. GET availab
 
 Keep support comparisons private, outside repositories. Save only safe issue codes/counts in audit reports. Never weaken validation, invent missing transactions or restore deterministic extraction to make a failing document appear successful.
 
-## Rollback
+## Subscription and payment troubleshooting
+
+See [Commercial plans](COMMERCIAL-PLANS.md). For `SUBSCRIPTION_EXPIRED`, inspect the account's existing plan, active payment status and `renewal_date`; never reset the plan to FREE or grant new lifetime uses. A later `billing_cycle_end` cannot override expiry.
+
+If payment return remains pending, check the owned transaction reference, verified webhook delivery, stored `Complete`/`processed_at` and resulting expiry. `/billing/payment-status` confirms only the authenticated user's matching transaction. Browser return alone cannot grant credits. A missing browser payment reference requires support verification; do not infer success from pre-existing credits. Keep hashes, secrets and payment/customer identifiers out of shared logs or documentation.
+
+Failed, cancelled, pending or duplicate callbacks must not replenish 25 credits or extend the term. A successful early same-plan renewal preserves the remaining term; its new allowance replaces unused monthly credits. No scheduled allowance reset or automatic monthly/yearly payment runs.
+
+## Rollback procedure
 
 Use a verified release tag/commit for a defect rollback while preserving AI-only behavior. Archive tags preserve old code for inspection; `archive/v1-final` is not a production rollback target. Do not reconnect `/parse` or deploy V1 to resolve an AI outage.

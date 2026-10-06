@@ -27,7 +27,8 @@ export const PRICING = {
       billing_cycle: "monthly",
       credits_per_cycle: 25,
       price_cents: 4850,
-      recurring: true
+      recurring: false,
+      renewal: "manual"
     },
 
     PRO_YEAR_UNLIMITED: {
@@ -37,7 +38,8 @@ export const PRICING = {
       billing_cycle: "yearly",
       unlimited: true,
       price_cents: 48500,
-      recurring: true
+      recurring: false,
+      renewal: "manual"
     }
   }
 };

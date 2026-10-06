@@ -82,7 +82,8 @@ async function applyPlanOrCredits(client, userId, planCode) {
            subscription_status = 'active',
            credits_remaining = 25,
            credits_per_cycle = 25,
-           renewal_date = NOW() + INTERVAL '1 month'
+           renewal_date = CASE WHEN plan_code = $2 AND renewal_date > NOW()
+             THEN renewal_date ELSE NOW() END + INTERVAL '1 month'
        WHERE id = $1`,
       [Number(userId), planCode]
     );
@@ -94,7 +95,8 @@ async function applyPlanOrCredits(client, userId, planCode) {
       `UPDATE users
        SET plan_code = $2,
            subscription_status = 'active',
-           renewal_date = NOW() + INTERVAL '1 year',
+           renewal_date = CASE WHEN plan_code = $2 AND renewal_date > NOW()
+             THEN renewal_date ELSE NOW() END + INTERVAL '1 year',
            credits_remaining = NULL
        WHERE id = $1`,
       [Number(userId), planCode]
@@ -210,7 +212,8 @@ export function createOzowWebhookRouter({
           throw error;
         }
 
-        if (existing.processed_at && existing.status === "Complete" && Status === "Complete") {
+        // Never downgrade a confirmed payment on a delayed/replayed callback.
+        if (existing.processed_at && existing.status === "Complete") {
           await client.query("COMMIT");
           return res.status(200).send("OK");
         }

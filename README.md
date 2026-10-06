@@ -39,9 +39,12 @@ The JavaScript backend has no compilation step. CI runs the current V2 suite. Op
 
 ## Documentation
 
+Paid monthly and annual terms require a new confirmed payment to renew. Expiry uses `renewal_date`, blocks paid-plan parses and preserves the account/history; it never resets the account to FREE.
+
 - [Architecture and data rules](docs/ARCHITECTURE.md)
 - [Configuration, deployment and support runbook](docs/OPERATIONS.md)
 - [QA and release acceptance](docs/QA.md)
+- [Commercial plans and manual renewal](docs/COMMERCIAL-PLANS.md)
 - [Change history](CHANGELOG.md)
 
 ## Historical code

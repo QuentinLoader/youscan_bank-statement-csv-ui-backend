@@ -3,11 +3,23 @@ import pool from "../config/db.js";
 import { authenticateUser } from "../middleware/auth.middleware.js";
 import { PRICING } from "../config/pricing.js";
 import { generateOzowRequestHash } from "../utils/ozowSecurity.js";
-import { BillingStatusError, getBillingStatusForUser } from "../services/billingStatus.service.js";
+import { BillingStatusError, getBillingStatusForUser, getPaymentConfirmation } from "../services/billingStatus.service.js";
 
 const router = express.Router();
 
+router.get("/payment-status", authenticateUser, async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  try {
+    return res.json(await getPaymentConfirmation({ userId: req.user.userId, reference: req.query.reference }));
+  } catch (error) {
+    return res.status(error instanceof BillingStatusError ? error.status : 500).json({
+      code: error instanceof BillingStatusError ? error.code : "PAYMENT_STATUS_FAILED",
+    });
+  }
+});
+
 router.get("/status", authenticateUser, async (req, res) => {
+  res.set("Cache-Control", "no-store");
   try {
     const status = await getBillingStatusForUser({ userId: req.user.userId });
     return res.json(status);

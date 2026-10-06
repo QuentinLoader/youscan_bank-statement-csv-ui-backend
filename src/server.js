@@ -98,7 +98,8 @@ app.get("/health/routes", (req, res) => {
     routes: {
       pricing: "/pricing",
       billingCreateOzowPayment: "/billing/create-ozow-payment",
-      billingStatus: "/billing/status",
+    billingStatus: "/billing/status",
+    billingPaymentStatus: "/billing/payment-status",
       ozowWebhook: "/ozow/webhook",
       v2Parse: "/api/v2/parse",
       v2AnalysisAvailability: "/api/v2/parse/availability",

@@ -172,7 +172,7 @@ test("Batch 17 Ozow safe event summary excludes amount, bank data, hash, and sec
   assert.equal(serialized.includes(privateKey), false);
 });
 
-function livePaymentDb({ alreadyComplete = false } = {}) {
+function livePaymentDb({ alreadyComplete = false, planCode = "PAYG_10" } = {}) {
   const calls = [];
   const client = {
     async query(sql, params = []) {
@@ -187,8 +187,8 @@ function livePaymentDb({ alreadyComplete = false } = {}) {
               processed_at: alreadyComplete ? new Date("2026-08-20T10:00:00.000Z") : null,
               status: alreadyComplete ? "Complete" : "Pending",
               user_id: 42,
-              plan_code: "PAYG_10",
-              amount: "29.50",
+              plan_code: planCode,
+              amount: (PRICING.PLANS[planCode].price_cents / 100).toFixed(2),
               currency_code: "ZAR",
             },
           ],
@@ -232,3 +232,39 @@ test("Batch 17 duplicate completed Ozow callback remains idempotent and does not
     await h.close();
   }
 });
+
+for (const planCode of ['MONTHLY_25', 'PRO_YEAR_UNLIMITED']) {
+  for (const status of ['Complete', 'Pending', 'Failed', 'Cancelled']) {
+    test(`${planCode} only a signed successful payment renews the term and allowance (${status})`, async () => {
+      const db = livePaymentDb({ planCode });
+      const h = await harness({ dbPool: db.pool });
+      try {
+        const response = await postForm(h.url, webhookPayload({
+          TransactionReference: `42_${planCode}_123456`,
+          Amount: (PRICING.PLANS[planCode].price_cents / 100).toFixed(2), Status: status,
+        }));
+        assert.equal(response.status, 200);
+        const update = db.calls.find(call => call.sql.startsWith('UPDATE users'));
+        assert.equal(Boolean(update), status === 'Complete');
+        if (update) {
+          assert.match(update.sql, /CASE WHEN plan_code = \$2 AND renewal_date > NOW\(\)/);
+          assert.match(update.sql, planCode === 'MONTHLY_25' ? /credits_remaining = 25/ : /credits_remaining = NULL/);
+          assert.equal(update.sql.includes('lifetime_parses_used'), false);
+        }
+      } finally { await h.close(); }
+    });
+  }
+  test(`${planCode} ignores replayed confirmation and late failure without extending twice`, async () => {
+    const db = livePaymentDb({ planCode, alreadyComplete: true });
+    const h = await harness({ dbPool: db.pool });
+    try {
+      for (const Status of ['Complete', 'Failed', 'Complete']) {
+        const response = await postForm(h.url, webhookPayload({ TransactionReference: `42_${planCode}_123456`,
+          Amount: (PRICING.PLANS[planCode].price_cents / 100).toFixed(2), Status }));
+        assert.equal(await response.text(), 'OK');
+      }
+      assert.equal(db.calls.some(call => call.sql.startsWith('UPDATE users')), false);
+      assert.equal(db.calls.some(call => call.sql.startsWith('UPDATE ozow_transactions')), false);
+    } finally { await h.close(); }
+  });
+}
