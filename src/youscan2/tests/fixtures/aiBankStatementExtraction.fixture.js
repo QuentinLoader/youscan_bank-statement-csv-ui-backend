@@ -36,6 +36,7 @@ export function makeValidAiBankStatementCandidate() {
     transactionCount: 3,
     transactions: [
       {
+        fee: field(null, 0.99, []),
         date: field(
           "01/07/2026",
           0.99,
@@ -58,12 +59,14 @@ export function makeValidAiBankStatementCandidate() {
         ),
       },
       {
+        fee: field(null, 0.99, []),
         date: field("02/07/2026", 0.99, "02/07/2026 SALARY 500.00 1400.00"),
         description: field("SALARY", 0.99, "02/07/2026 SALARY 500.00 1400.00"),
         amount: field(500, 0.99, "02/07/2026 SALARY 500.00 1400.00"),
         balance: field(1400, 0.99, "02/07/2026 SALARY 500.00 1400.00"),
       },
       {
+        fee: field(null, 0.99, []),
         date: field(
           "03/07/2026",
           0.99,

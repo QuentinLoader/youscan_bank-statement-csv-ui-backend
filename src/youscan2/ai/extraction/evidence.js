@@ -33,6 +33,7 @@ function collectFields(candidate) {
     fields.push([`transactions[${index}].date`, transaction?.date]);
     fields.push([`transactions[${index}].description`, transaction?.description]);
     fields.push([`transactions[${index}].amount`, transaction?.amount]);
+    fields.push([`transactions[${index}].fee`, transaction?.fee]);
     fields.push([`transactions[${index}].balance`, transaction?.balance]);
   });
 

@@ -27,6 +27,7 @@ Rules:
 - Preserve bank name, account/product name, account number, statement number,
   statement period, statement date, opening balance and closing balance.
 - Preserve all transaction rows in their original order.
+- Preserve column headings and label the monetary columns on every transaction line (for example Money In=..., Money Out=..., Fee=..., Balance=...). Keep blank columns explicitly blank. Never merge a separate fee with the payment amount or omit fee-only rows.
 - Read the visible page images as well as the text layer. Some PDFs store transaction descriptions as images even when dates and amounts are selectable text.
 - Keep each transaction on one logical line wherever possible.
 - Preserve transaction dates, descriptions, references, amounts, balances,

@@ -47,6 +47,19 @@ test("production rejects a legacy deterministic result even after successful sha
   } finally { await h.close(); }
 });
 
+test('production rejects batches larger than three before extracting any file', async () => {
+  let jobs = 0;
+  const h = await makeHarness({ runJob: async () => { jobs++; return completedResult(); } });
+  try {
+    const form = oneFileForm();
+    for (let i = 0; i < 3; i++) form.append('files', new Blob(['synthetic'], { type: 'application/pdf' }), `statement-${i}.pdf`);
+    const response = await fetch(h.url, { method: 'POST', headers: headers(), body: form });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).error, 'V2_BATCH_LIMIT');
+    assert.equal(jobs, 0);
+  } finally { await h.close(); }
+});
+
 test("availability endpoint authenticates, caches checks, and exposes only customer status", async () => {
   let probes = 0;
   const availability = createAnalysisAvailability({

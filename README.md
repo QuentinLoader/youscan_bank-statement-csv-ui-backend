@@ -12,6 +12,15 @@ balances remain null; no frontend balance reconstruction is allowed.
 Disabled, failed, invalid or rejected AI cannot produce a usable statement.
 Valid AI data with warnings uses the existing human-review screen.
 
+AI transaction extraction includes a separate signed `fee` field with evidence.
+The canonical `amount` is the row's account movement: AI payment plus AI attached
+fee, rounded to cents. Rows with a nonzero attached fee also retain `paymentAmount`
+and `fee` for review and CSV details. Fee-only rows use payment zero and the printed
+fee once. A fee is never inferred from balance differences; uncertain fee extraction
+requires review. Fees already included in the printed payment must not be added again.
+Browser batches and multipart uploads are limited to three statements. Each browser
+request still processes one file; the smaller batch does not change per-file timeouts.
+
 Production PDF uploads use two AI steps: full-page transcription (including
 text stored as images), then structured bank-statement extraction. A useful
 native text length does not guarantee complete transaction descriptions, so

@@ -34,12 +34,14 @@ export function makeFnbShadowCandidate({ omitReferenceFromDescription = false } 
         date: field("01/07/2026", tx1),
         description: field("Card Purchase Coffee Shop", tx1),
         amount: field(-100, tx1),
+        fee: field(null, []),
         balance: field(900, tx1),
       },
       {
         date: field("02/07/2026", tx2),
         description: field("CUSTOMER PAYMENT", tx2),
         amount: field(500, tx2),
+        fee: field(null, []),
         balance: field(1400, tx2),
       },
       {
@@ -51,12 +53,14 @@ export function makeFnbShadowCandidate({ omitReferenceFromDescription = false } 
           omitReferenceFromDescription ? "EFT PAYMENT SUPPLIER ABC" : tx3
         ),
         amount: field(-250, tx3),
+        fee: field(null, []),
         balance: field(1150, tx3),
       },
       {
         date: field("04/07/2026", tx4),
         description: field("Monthly Acc Fee", tx4),
         amount: field(-50, tx4),
+        fee: field(null, []),
         balance: field(1100, tx4),
       },
     ],
