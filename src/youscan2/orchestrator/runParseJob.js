@@ -13,6 +13,7 @@ import { getActiveSchemaForDocumentType } from "../registry/schemaRegistry.js";
 import { PARSE_JOB_STATUSES } from "../schemas/common.js";
 import { createParseJob } from "./createParseJob.js";
 import { runAiParseJob } from "./runAiParseJob.js";
+import { AI_EXTRACTION_FAILED_MESSAGE, summarizeAiValidationIssues } from "../ai/validationDiagnostics.js";
 import { finalizeParseJob } from "./finalizeParseJob.js";
 import {
   analysisAvailability, analysisUnavailableError, isProviderUnavailable,
@@ -273,6 +274,8 @@ if (finalResult?.status === PARSE_JOB_STATUSES.FAILED) {
         name: error?.name || "Error",
         subtype: classification?.documentSubtype || null,
         message: sanitizeDiagnosticMessage(errorMessage),
+        requestId: error?.details?.requestId || null,
+        validationIssues: summarizeAiValidationIssues(error?.details?.issues),
       })
     );
 
@@ -286,7 +289,8 @@ if (finalResult?.status === PARSE_JOB_STATUSES.FAILED) {
       message: "YouScan V2 parse job failed",
       error: {
         code: errorCode,
-        message: errorMessage,
+        message: requireAi && ["V2_AI_INVALID_RESPONSE", "V2_AI_ANALYSIS_REJECTED", "V2_AI_PROVIDER_REFUSED"].includes(errorCode)
+          ? AI_EXTRACTION_FAILED_MESSAGE : errorMessage,
       },
     });
   }

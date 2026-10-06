@@ -24,6 +24,8 @@ For running balances, preserve the printed statement value and sign. If a runnin
 For metadata or transaction fields that are not explicitly supported, return null where the schema allows it. Never guess an account number, client name, date, amount or balance.
 Dates must be DD/MM/YYYY when they can be determined reliably.
 For every populated field, provide one to three short evidence snippets copied from the supplied statement text. Evidence must support the field and must not be fabricated.
+Each evidence snippet must be non-empty and at most 500 characters. For every null-valued field, return evidence=[]; do not attach explanations or evidence to a missing value.
+Every field must include value, confidence (a number from 0 to 1), and evidence. Numeric values must be JSON numbers, never formatted strings with currency symbols or separators.
 The transactionCount must exactly equal the number of transaction objects returned.
 Overall confidence and field confidence must represent factual extraction certainty. Do not inflate confidence to satisfy thresholds.
 Do not add commentary outside the strict response schema.`;
