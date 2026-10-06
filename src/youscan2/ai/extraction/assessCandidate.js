@@ -45,11 +45,12 @@ function collectConfidenceIssues(candidate, threshold) {
     fields.push([`transactions[${index}].date`, transaction?.date]);
     fields.push([`transactions[${index}].description`, transaction?.description]);
     fields.push([`transactions[${index}].amount`, transaction?.amount]);
+    fields.push([`transactions[${index}].fee`, transaction?.fee]);
     fields.push([`transactions[${index}].balance`, transaction?.balance]);
   });
 
   for (const [fieldPath, field] of fields) {
-    if (!field || field.value === null) continue;
+    if (!field || (field.value === null && !fieldPath.endsWith('.fee'))) continue;
     if (field.confidence < threshold) {
       issues.push({
         severity: "warning",
@@ -237,6 +238,16 @@ export async function assessAiBankStatementExtraction({
   }
 
   issues.push(...collectConfidenceIssues(candidate, minFieldConfidence));
+  candidate.transactions.forEach((row, rowIndex) => {
+    if (row.fee.value === null || row.fee.value === 0) return;
+    for (const field of ['amount', 'fee']) {
+      const value = row[field].value;
+      if (Math.abs(value * 100 - Math.round(value * 100)) > 0.000001) {
+        issues.push({ severity: 'warning', issueType: 'source_amount_precision_issue',
+          fieldPath: `transactions[${rowIndex}].${field}`, rowIndex });
+      }
+    }
+  });
 
   const evidence = verifyAiExtractionEvidence(candidate, sourceText);
   issues.push(...evidence.issues);

@@ -2,7 +2,7 @@
 export const AI_EXTRACTION_FAILED_MESSAGE =
   "AI could not extract this statement correctly. Please try again.";
 
-const FIELD = /^(?:data\.)?(bankName|accountNumber|clientName|statementPeriodStart|statementPeriodEnd|openingBalance|closingBalance|transactionCount|transactions(?:\[\d{1,4}\])?(?:\.(?:date|description|amount|balance))?)(?:\.(value|confidence|evidence)(?:\[\d{1,4}\])?)?(?=\s|\(|$)/;
+const FIELD = /^(?:data\.)?(bankName|accountNumber|clientName|statementPeriodStart|statementPeriodEnd|openingBalance|closingBalance|transactionCount|transactions(?:\[\d{1,4}\])?(?:\.(?:date|description|amount|fee|balance))?)(?:\.(value|confidence|evidence)(?:\[\d{1,4}\])?)?(?=\s|\(|$)/;
 const RULES = [
   [/does not match transactions\.length/, "transaction_count_mismatch"],
   [/must be empty when value is null\.$/, "null_field_has_evidence"],

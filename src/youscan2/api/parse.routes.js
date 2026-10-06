@@ -27,7 +27,7 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: 10 * 1024 * 1024,
-    files: 10,
+    files: 3,
   },
 });
 
@@ -198,7 +198,14 @@ export function createV2ParseRouter({
     authenticate,
     checkAccess,
     requireAvailability,
-    upload.any(),
+    (req, res, next) => upload.any()(req, res, error => {
+      if (error?.code === 'LIMIT_FILE_COUNT') {
+        return res.status(400).json({ error: 'V2_BATCH_LIMIT',
+          message: 'Upload up to 3 statements at a time. Please split larger batches.' });
+      }
+      if (error) return next(error);
+      next();
+    }),
     async (req, res) => {
       try {
         const files = req.files || [];

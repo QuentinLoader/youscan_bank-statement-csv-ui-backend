@@ -1,7 +1,7 @@
 /**
  * YouScan V2
- * Converts a strict AI extraction candidate to the canonical bank-statement
- * data shape for validation/comparison only.
+ * Projects AI payment/fee fields into canonical account movements, retaining
+ * the separate source values when a fee is attached. Balances stay untouched.
  */
 
 function valueOf(field) {
@@ -22,7 +22,14 @@ export function projectAiBankStatementCandidate(candidate, { sourceFileName = nu
       ? candidate.transactions.map((transaction) => ({
           date: valueOf(transaction?.date),
           description: valueOf(transaction?.description) ?? "",
-          amount: valueOf(transaction?.amount),
+          // Arithmetic uses only independently extracted AI fields, never balances.
+          amount: valueOf(transaction?.fee) && typeof valueOf(transaction?.amount) === "number"
+            ? Math.round((valueOf(transaction.amount) + valueOf(transaction.fee)) * 100) / 100
+            : valueOf(transaction?.amount),
+          ...(valueOf(transaction?.fee) ? {
+            paymentAmount: valueOf(transaction.amount),
+            fee: valueOf(transaction.fee),
+          } : {}),
           balance: valueOf(transaction?.balance),
         }))
       : [],

@@ -65,9 +65,10 @@ export const AI_BANK_STATEMENT_EXTRACTION_RESPONSE_SCHEMA = Object.freeze({
           date: NULLABLE_STRING_FIELD_SCHEMA,
           description: STRING_FIELD_SCHEMA,
           amount: NUMBER_FIELD_SCHEMA,
+          fee: NULLABLE_NUMBER_FIELD_SCHEMA,
           balance: NULLABLE_NUMBER_FIELD_SCHEMA,
         },
-        required: ["date", "description", "amount", "balance"],
+        required: ["date", "description", "amount", "fee", "balance"],
         additionalProperties: false,
       },
     },
@@ -98,7 +99,7 @@ const TOP_LEVEL_KEYS = new Set([
   "transactions",
 ]);
 
-const TRANSACTION_KEYS = new Set(["date", "description", "amount", "balance"]);
+const TRANSACTION_KEYS = new Set(["date", "description", "amount", "fee", "balance"]);
 const FIELD_KEYS = new Set(["value", "confidence", "evidence"]);
 
 function addUnknownKeys(issues, value, allowedKeys, path) {
@@ -240,6 +241,10 @@ export function validateAiBankStatementExtractionData(data) {
       });
       validateField(issues, transaction.amount, `${path}.amount`, {
         valueType: "number",
+      });
+      validateField(issues, transaction.fee, `${path}.fee`, {
+        valueType: "number",
+        nullable: true,
       });
       validateField(issues, transaction.balance, `${path}.balance`, {
         valueType: "number",

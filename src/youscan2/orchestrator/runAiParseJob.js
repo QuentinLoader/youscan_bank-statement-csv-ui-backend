@@ -8,15 +8,18 @@ import { finalizeParseJob } from "./finalizeParseJob.js";
 
 const bankAliases = new Map([
   ["absa bank", "absa_statement"],
+  ["absa bank limited", "absa_statement"],
+  ["absa bank ltd", "absa_statement"],
+  ["absa bank south africa", "absa_statement"],
+  ["absa south africa", "absa_statement"],
   ["first national bank", "fnb_statement"],
   ["capitec bank", "capitec_statement"],
   ["capitec bank limited", "capitec_statement"],
   ["capitec bank ltd", "capitec_statement"],
-  ["capitec bank ltd.", "capitec_statement"],
   ["discovery", "discovery_statement"],
   ["standard bank south africa", "standard_bank_statement"],
 ]);
-const normalizeBank = (name) => String(name || "").trim().replace(/\s+/g, " ").toLowerCase();
+const normalizeBank = (name) => String(name || "").toLowerCase().replace(/[().]/g, " ").trim().replace(/\s+/g, " ");
 
 // The production path never invokes a bank parser or compares against its data.
 // All displayed values come from this AI candidate; validation only flags issues.

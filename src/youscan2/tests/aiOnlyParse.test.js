@@ -19,7 +19,7 @@ function parse(candidate = makeValidAiBankStatementCandidate(), text = AI_BANK_S
   });
 }
 
-for (const bank of ["FNB", "ABSA", "Standard Bank"]) {
+for (const bank of ["FNB", "ABSA", "Standard Bank", "Absa Bank Limited", "Absa Bank (Ltd.)", "Absa Bank South Africa"]) {
   test(`${bank}: V2 production returns exclusively AI fields, without parser data or comparison`, async () => {
     const candidate = makeValidAiBankStatementCandidate();
     candidate.bankName.value = bank;
@@ -89,4 +89,103 @@ test("invalid AI output yields no statement even where the old FNB parser could 
   assert.equal(result.status, "failed");
   assert.equal(result.result, null);
   assert.equal(result.aiCompleted, undefined);
+});
+
+function withFee(fee = -6, payment = -100) {
+  const candidate = makeValidAiBankStatementCandidate();
+  const delta = fee + payment + 100;
+  candidate.transactions[0].amount.value = payment;
+  if (payment === 0) candidate.transactions[0].description.value = 'Service fee';
+  candidate.transactions[0].fee = { value: fee, confidence: 0.99, evidence: [] };
+  candidate.closingBalance.value += delta;
+  candidate.closingBalance.evidence = [`Closing Balance ${candidate.closingBalance.value.toFixed(2)}`];
+  const lines = candidate.transactions.map((row, index) => {
+    row.balance.value += delta;
+    const line = `${row.date.value} ${row.description.value} Money Out/In=${row.amount.value.toFixed(2)} Fee=${index === 0 ? fee.toFixed(2) : 'blank'} Balance=${row.balance.value.toFixed(2)}`;
+    for (const field of Object.values(row)) if (field.value !== null) field.evidence = [line];
+    return line;
+  });
+  const text = AI_BANK_STATEMENT_SOURCE_TEXT.split('\n').slice(0, 5).join('\n') + '\n' + lines.join('\n') + '\n' + candidate.closingBalance.evidence[0];
+  return { candidate, text };
+}
+
+test('attached AI fees reconcile without overwriting the source payment or balance', async () => {
+  const { candidate, text } = withFee();
+  const result = await parse(candidate, text);
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(result.result.data.transactions[0], {
+    date: '01/07/2026', description: 'CARD PURCHASE SHOP', amount: -106,
+    paymentAmount: -100, fee: -6, balance: 894,
+  });
+  assert.equal(result.result.data.closingBalance, 1344);
+  assert.equal(result.result.issues.length, 0);
+});
+
+test('an omitted attached fee remains a real reconciliation warning', async () => {
+  const { candidate, text } = withFee();
+  candidate.transactions[0].fee = { value: null, confidence: 0.99, evidence: [] };
+  const result = await parse(candidate, text);
+  assert.equal(result.status, 'needs_review');
+  assert.equal(result.result.data.transactions[0].amount, -100);
+  assert.equal(result.result.data.transactions[0].fee, undefined);
+  assert.ok(result.result.issues.some(issue => issue.issueType === 'statement_total_reconciliation_mismatch'));
+});
+
+test('fee-only rows use the AI fee once, and fee refunds preserve their positive sign', async () => {
+  for (const fee of [-100, 2]) {
+    const { candidate, text } = withFee(fee);
+    const refunded = await parse(candidate, text);
+    assert.equal(refunded.result.data.transactions[0].amount, -100 + fee);
+  }
+  const { candidate, text } = withFee(-6, 0);
+  const result = await parse(candidate, text);
+  assert.equal(result.status, 'completed');
+  assert.equal(result.result.data.transactions[0].amount, -6);
+  assert.equal(result.result.data.transactions[0].paymentAmount, 0);
+});
+
+test('missing fee fields fail the strict AI contract; uncertain fee values require review', async () => {
+  const { candidate, text } = withFee();
+  delete candidate.transactions[0].fee;
+  assert.equal((await parse(candidate, text)).status, 'failed');
+  candidate.transactions[0].fee = { value: null, confidence: 0.1, evidence: [] };
+  const result = await parse(candidate, text);
+  assert.equal(result.status, 'needs_review');
+  assert.ok(result.result.issues.some(issue => issue.issueType === 'low_field_confidence' && issue.fieldPath === 'transactions[0].fee'));
+});
+
+test('41 independently extracted attached fees are included exactly once in totals', async () => {
+  const candidate = makeValidAiBankStatementCandidate();
+  candidate.openingBalance.value = 100000;
+  candidate.openingBalance.evidence = ['Opening Balance 100000.00'];
+  let balance = 100000;
+  const lines = [];
+  candidate.transactions = Array.from({ length: 41 }, (_, index) => {
+    const fee = index === 40 ? -15 : -5;
+    balance += -200 + fee;
+    const line = `01/07/2026 TEST PAYMENT ${index} Money Out=-200.00 Fee=${fee.toFixed(2)} Balance=${balance.toFixed(2)}`;
+    lines.push(line);
+    const field = value => ({ value, confidence: 0.99, evidence: [line] });
+    return { date: field('01/07/2026'), description: field(`TEST PAYMENT ${index}`),
+      amount: field(-200), fee: field(fee), balance: field(balance) };
+  });
+  candidate.transactionCount = 41;
+  candidate.closingBalance.value = balance;
+  candidate.closingBalance.evidence = [`Closing Balance ${balance.toFixed(2)}`];
+  const text = AI_BANK_STATEMENT_SOURCE_TEXT.split('\n').slice(0, 5).join('\n').replace('Opening Balance 1000.00', 'Opening Balance 100000.00') + '\n' + lines.join('\n') + '\n' + candidate.closingBalance.evidence[0];
+  const result = await parse(candidate, text);
+  assert.equal(result.status, 'completed');
+  assert.equal(result.result.issues.length, 0);
+  assert.equal(result.result.data.transactions.length, 41);
+  assert.equal(result.result.data.transactions.reduce((sum, row) => sum + row.fee, 0), -215);
+  assert.equal(result.result.data.transactions.reduce((sum, row) => sum + row.amount, 0), -8415);
+  assert.equal(result.result.data.closingBalance, 91585);
+});
+
+test('rounding a row total cannot hide suspicious precision in the AI payment or fee', async () => {
+  const { candidate, text } = withFee(-6.001);
+  const result = await parse(candidate, text);
+  assert.equal(result.status, 'needs_review');
+  assert.ok(result.result.issues.some(issue => issue.issueType === 'source_amount_precision_issue'));
+  assert.equal(result.result.data.transactions[0].fee, -6.001);
 });
