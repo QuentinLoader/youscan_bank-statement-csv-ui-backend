@@ -53,6 +53,7 @@ export const AI_BANK_STATEMENT_EXTRACTION_RESPONSE_SCHEMA = Object.freeze({
     closingBalance: NULLABLE_NUMBER_FIELD_SCHEMA,
     transactionCount: {
       type: "integer",
+      description: "Number of returned transaction-table rows across all pages, including zero-amount rows; not the bank's turnover-summary debit/credit count. Must equal transactions.length.",
       minimum: 0,
       maximum: MAX_TRANSACTIONS,
     },
