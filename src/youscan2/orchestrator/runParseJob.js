@@ -12,6 +12,7 @@ import { getParserByKey } from "../registry/parserRegistry.js";
 import { getActiveSchemaForDocumentType } from "../registry/schemaRegistry.js";
 import { PARSE_JOB_STATUSES } from "../schemas/common.js";
 import { createParseJob } from "./createParseJob.js";
+import { runAiParseJob } from "./runAiParseJob.js";
 import { finalizeParseJob } from "./finalizeParseJob.js";
 import {
   analysisAvailability, analysisUnavailableError, isProviderUnavailable,
@@ -43,8 +44,9 @@ export async function runParseJob({
   extractionMeta = null,
   classificationOptions = null,
   shadowAiOptions = null,
-  // Offline parser/shadow tooling remains usable; the production API always
-  // requires AI and independently verifies its successful processing marker.
+  aiOptions = null,
+  // Production dispatches directly to AI; the false default is for offline
+  // parser/shadow tooling, never the customer API.
   requireAi = false,
   availability = analysisAvailability,
 }) {
@@ -54,7 +56,11 @@ export async function runParseJob({
   let stage = "classification";
 
   try {
-    if (requireAi) await availability.assertAvailable();
+    if (requireAi) {
+      stage = "ai_extraction";
+      return await runAiParseJob({ job, file, extractedText, extractionMeta,
+        availability, aiOptions: aiOptions || shadowAiOptions });
+    }
     stage = "classification";
     classification = await classifyDocument({
       extractedText,
@@ -213,36 +219,20 @@ if (finalResult?.status === PARSE_JOB_STATUSES.FAILED) {
       message: "YouScan V2 parse job completed",
     });
 
-    // Production requires AI extraction before any customer result is usable.
-    // Keep the existing comparison and human-review workflow for successful AI.
+    // Offline parser comparison tooling only. Production returned above.
     if (
       classification.documentType === DOCUMENT_TYPES.BANK_STATEMENT &&
       finalResult?.data &&
-      (requireAi || shouldRunShadowAi(shadowAiOptions))
+      shouldRunShadowAi(shadowAiOptions)
     ) {
       stage = "shadow_ai";
-      if (requireAi) await availability.assertAvailable();
       const shadowAi = await runAiBankStatementShadow({
         extractedText,
         sourceFileName: file?.originalname || null,
         classification,
         deterministicCanonical: finalResult.data,
         ...(shadowAiOptions || {}),
-        required: requireAi,
       });
-
-      if (requireAi && (!shadowAi.attempted || !shadowAi.ai)) {
-        throw analysisUnavailableError();
-      }
-      if (requireAi && shadowAi.status === "rejected") {
-        const error = new Error("AI analysis could not validate this document.");
-        error.code = "V2_AI_ANALYSIS_REJECTED";
-        throw error;
-      }
-      if (requireAi && shadowAi.status === "needs_review") {
-        finalEnvelope.status = PARSE_JOB_STATUSES.NEEDS_REVIEW;
-        finalResult.status = PARSE_JOB_STATUSES.NEEDS_REVIEW;
-      }
 
       stage = "ai_decision";
       const aiDecision = evaluateAiDecisionPolicy({
@@ -263,13 +253,9 @@ if (finalResult?.status === PARSE_JOB_STATUSES.FAILED) {
         shadowAi,
         aiDecision,
         aiCorrectionProposal,
-        ...(requireAi ? { aiCompleted: true } : {}),
       };
     }
 
-    if (requireAi && ["completed", "needs_review"].includes(status)) {
-      throw analysisUnavailableError();
-    }
     return finalEnvelope;
   } catch (error) {
     if (requireAi && isProviderUnavailable(error)) {

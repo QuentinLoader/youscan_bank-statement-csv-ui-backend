@@ -3,9 +3,14 @@
 ## Required AI availability gate
 
 The production `POST /api/v2/parse` endpoint requires successful OpenAI
-bank-statement extraction before returning usable results. Deterministic parsing
-and the existing comparison/review workflow remain; disabled, failed or rejected
-AI extraction cannot silently become a completed customer analysis.
+bank-statement extraction and uses the AI candidate as its only data source.
+The customer path bypasses bank-specific parsers, heuristic classification,
+shadow comparison and correction proposals. Transactions, balances, metadata,
+review and CSV export all start from AI data. Validation checks evidence,
+confidence, shape and arithmetic without rewriting extracted values. Missing
+balances remain null; no frontend balance reconstruction is allowed.
+Disabled, failed, invalid or rejected AI cannot produce a usable statement.
+Valid AI data with warnings uses the existing human-review screen.
 
 `GET /api/v2/parse/availability` requires the usual customer JWT and returns
 `available`, `checkedAt` (Unix milliseconds), `retryAfterSeconds`, and a generic
