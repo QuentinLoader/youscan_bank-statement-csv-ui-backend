@@ -19,7 +19,9 @@ function parse(candidate = makeValidAiBankStatementCandidate(), text = AI_BANK_S
   });
 }
 
-for (const bank of ["FNB", "ABSA", "Standard Bank", "Absa Bank Limited", "Absa Bank (Ltd.)", "Absa Bank South Africa"]) {
+for (const bank of ["FNB", "ABSA", "Standard Bank", "Absa Bank Limited", "Absa Bank (Ltd.)", "Absa Bank South Africa",
+  "First National Bank (FNB)", "FNB (First National Bank)",
+  "First National Bank - a division of FirstRand Bank Limited", "First National Bank, a division of FirstRand Bank Ltd."]) {
   test(`${bank}: V2 production returns exclusively AI fields, without parser data or comparison`, async () => {
     const candidate = makeValidAiBankStatementCandidate();
     candidate.bankName.value = bank;
@@ -73,6 +75,17 @@ test("an unrecognised lookalike bank is not accepted as Capitec", async () => {
   assert.equal(result.classification.supported, false);
   assert.equal(result.result, null);
 });
+
+for (const bank of ['FirstRand Bank Limited', 'Gold Business Account', 'First National Bank Example Finance']) {
+  test(`${bank}: an ambiguous parent, product or lookalike is not accepted as FNB`, async () => {
+    const candidate = makeValidAiBankStatementCandidate();
+    candidate.bankName.value = bank;
+    candidate.bankName.evidence = [`${bank} BANK STATEMENT`];
+    const result = await parse(candidate, AI_BANK_STATEMENT_SOURCE_TEXT.replace('FNB BANK STATEMENT', `${bank} BANK STATEMENT`));
+    assert.equal(result.status, 'unsupported');
+    assert.equal(result.result, null);
+  });
+}
 test("reconciliation flags only AI values and never replaces a conflicting AI balance", async () => {
   const candidate = makeValidAiBankStatementCandidate();
   candidate.closingBalance.value = 1300;

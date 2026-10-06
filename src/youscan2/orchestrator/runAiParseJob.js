@@ -13,13 +13,17 @@ const bankAliases = new Map([
   ["absa bank south africa", "absa_statement"],
   ["absa south africa", "absa_statement"],
   ["first national bank", "fnb_statement"],
+  ["first national bank fnb", "fnb_statement"],
+  ["fnb first national bank", "fnb_statement"],
+  ["first national bank a division of firstrand bank limited", "fnb_statement"],
+  ["first national bank a division of firstrand bank ltd", "fnb_statement"],
   ["capitec bank", "capitec_statement"],
   ["capitec bank limited", "capitec_statement"],
   ["capitec bank ltd", "capitec_statement"],
   ["discovery", "discovery_statement"],
   ["standard bank south africa", "standard_bank_statement"],
 ]);
-const normalizeBank = (name) => String(name || "").toLowerCase().replace(/[().]/g, " ").trim().replace(/\s+/g, " ");
+const normalizeBank = (name) => String(name || "").toLowerCase().replace(/[().,\u2013\u2014-]/g, " ").trim().replace(/\s+/g, " ");
 
 // The production path never invokes a bank parser or compares against its data.
 // All displayed values come from this AI candidate; validation only flags issues.

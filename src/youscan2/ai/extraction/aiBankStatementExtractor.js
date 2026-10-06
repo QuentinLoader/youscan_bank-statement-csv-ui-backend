@@ -17,6 +17,7 @@ import {
 
 const EXTRACTION_SYSTEM_PROMPT = `You are the YouScan V2 bank-statement extraction engine.
 Extract only facts explicitly supported by the supplied statement text.
+For bankName, use the bank brand explicitly identified by this statement, not the account/product name or a parent company's legal name. A footer reading "First National Bank - a division of FirstRand Bank Limited" identifies First National Bank (FNB), not a separate FirstRand bank statement. Return "FNB" or "First National Bank" with evidence from that footer. Do not infer FNB from "FirstRand" alone, a payment counterparty, or the words "Gold Business Account" alone.
 Return every transaction in source order; do not summarize, combine, omit or invent rows.
 Keep dated zero-amount transaction-table rows, including rows whose printed balance is unchanged. Do not include headings, closing-balance lines or turnover summaries as transaction rows.
 For transaction descriptions, preserve the source description/reference tokens in source order with whitespace normalization only. Do not silently drop embedded date codes or bank reference tokens such as ROL030726 merely because the transaction date is also returned separately.
