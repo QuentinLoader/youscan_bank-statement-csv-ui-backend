@@ -8,6 +8,8 @@
 
 ## Verification
 
+- Compatible dependency security updates applied after consolidation: backend npm audit reports zero vulnerabilities. Follow-up changes: `package-lock.json`, `CHANGELOG.md`, this release record, and the stale build comment in `src/server.js`.
+
 - Current backend suite: 244 tests, 241 passed, zero failed, three optional live-provider tests skipped.
 - Frontend: 36 tests passed; TypeScript check, production build and changed-component lint passed.
 - Legacy bank-parser tests were retired with their implementation; the pre-cleanup archive tag retains the complete previous 389-test checkpoint. The smaller current suite is intentional and still covers AI extraction, validation, availability, commercial behavior and audit support.

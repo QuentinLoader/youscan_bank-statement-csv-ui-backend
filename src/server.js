@@ -1,6 +1,4 @@
-// ==========================================
-// 🔥 SERVER BUILD: 2026-03-23-FINAL-STABLE
-// ==========================================
+// Canonical production entry point; extraction is served by /api/v2/parse.
 
 import dotenv from "dotenv";
 dotenv.config();

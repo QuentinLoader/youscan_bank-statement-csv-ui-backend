@@ -1,5 +1,11 @@
 # Change history
 
+## 6 October 2026 — Dependency security maintenance
+
+- Applied compatible lockfile updates for the HTTP, rate-limit and email dependencies; no major-version upgrades or extraction changes.
+- Backend npm audit reports zero vulnerabilities after updates (previously ten).
+- Re-ran the backend suite: 241 passed, zero failed, three optional live-provider tests skipped.
+
 ## 6 October 2026 — AI-only production consolidation
 
 - Incorporated FNB brand/legal-name recognition fix and earlier PDF page-reading, fee and source-row-count fixes.
