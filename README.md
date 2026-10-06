@@ -12,6 +12,15 @@ balances remain null; no frontend balance reconstruction is allowed.
 Disabled, failed, invalid or rejected AI cannot produce a usable statement.
 Valid AI data with warnings uses the existing human-review screen.
 
+Production PDF uploads use two AI steps: full-page transcription (including
+text stored as images), then structured bank-statement extraction. A useful
+native text length does not guarantee complete transaction descriptions, so
+native PDF text is metadata-only in the customer path. Required PDF reading
+does not depend on the legacy optional scan-recovery flag. Failed/incomplete
+page reading stops the document with no native-text fallback. Both AI steps
+have bounded timeouts; page reading respects `YOUSCAN_V2_AI_TIMEOUT_MS` up to
+two minutes. This adds an AI PDF-reading call for digitally generated PDFs too.
+
 `GET /api/v2/parse/availability` requires the usual customer JWT and returns
 `available`, `checkedAt` (Unix milliseconds), `retryAfterSeconds`, and a generic
 customer message. It never returns provider errors. The frontend polls this

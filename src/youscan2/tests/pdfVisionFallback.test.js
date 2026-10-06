@@ -47,6 +47,47 @@ No. Debit Transactions 40 133,355.68 Dr
 First National Bank - a division of FirstRand Bank Limited
 `.trim();
 
+test("production reads the full PDF even when its native text looks useful but lacks descriptions", async () => {
+  let calls = 0;
+  const partialText = recoveredFnbText.replace('FNB App Transfer To Prosper Payment', '').replace('FNB App Transfer From Loan Jjp - Ssp', '');
+  assert.equal(hasUsefulPdfText(partialText), true);
+  const result = await extractTextFromFile(pdfFile(), {
+    requireAi: true, pdfParseImpl: async () => ({ text: partialText, numpages: 1 }),
+    env: { OPENAI_API_KEY: "synthetic-key", YOUSCAN_V2_AI_MODEL: "synthetic" },
+    fetchImpl: async (_url, options) => {
+      calls++;
+      const request = JSON.parse(options.body);
+      assert.equal(request.store, false);
+      assert.equal(request.input[0].content[0].type, "input_file");
+      assert.equal(request.input[0].content[0].detail, "high");
+      assert.ok(request.input[0].content[0].file_data.startsWith('data:application/pdf;base64,'));
+      assert.ok(options.signal);
+      return completedOpenAiResponse(recoveredFnbText);
+    },
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.text, recoveredFnbText);
+  assert.equal(result.meta.textSource, "openai_pdf_vision");
+});
+
+test("production never falls back to native text when required PDF page reading is incomplete", async () => {
+  for (const failure of ["incomplete", "empty"]) {
+    await assert.rejects(() => extractTextFromFile(pdfFile(), {
+      requireAi: true, pdfParseImpl: async () => ({ text: recoveredFnbText, numpages: 1 }),
+      env: { OPENAI_API_KEY: "synthetic-key", YOUSCAN_V2_AI_MODEL: "synthetic" },
+      fetchImpl: async () => failure === "empty" ? completedOpenAiResponse("") : {
+        ok: true, status: 200, json: async () => ({ status: "incomplete" }),
+      },
+    }), error => error.code === "V2_AI_INVALID_RESPONSE" && error.status === 422);
+  }
+});
+
+test("production fails closed without PDF reading credentials even when native text is useful", async () => {
+  await assert.rejects(() => extractTextFromFile(pdfFile(), {
+    requireAi: true, pdfParseImpl: async () => ({ text: recoveredFnbText, numpages: 1 }), env: {},
+  }), error => error.code === "V2_AI_CONFIG_INVALID");
+});
+
 function completedOpenAiResponse(text) {
   return {
     ok: true,
