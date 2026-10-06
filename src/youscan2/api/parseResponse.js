@@ -23,7 +23,8 @@ export function toPublicV2FileResult({ fileName, parseResult, reviewCase = null 
     extractionMeta: parseResult?.extractionMeta || null,
     message: parseResult?.message || null,
     error: parseResult?.error || null,
-    ai: parseResult?.shadowAi || null,
+    authoritativeSource: parseResult?.authoritativeSource || null,
+    ai: parseResult?.aiExtraction || parseResult?.shadowAi || null,
     aiDecision: parseResult?.aiDecision || null,
     review: safeProposal
       ? {

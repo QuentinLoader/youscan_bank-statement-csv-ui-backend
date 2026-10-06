@@ -86,8 +86,10 @@ function ensureUsableParse(parseResult) {
     );
   }
 
-  if (parseResult?.aiCompleted !== true || !parseResult?.shadowAi?.ai ||
-      ["unavailable", "disabled", "rejected"].includes(parseResult?.shadowAi?.status)) {
+  if (parseResult?.aiCompleted !== true || !parseResult?.aiExtraction?.meta ||
+      parseResult?.authoritativeSource !== "ai" ||
+      parseResult?.result?.authoritativeSource !== "ai" ||
+      !["completed", "needs_review"].includes(parseResult?.aiExtraction?.status)) {
     throw analysisUnavailableError();
   }
 }
@@ -110,8 +112,8 @@ async function maybePersistReview({
     });
   } catch (error) {
     /*
-     * Review persistence is supplemental to the authoritative
-     * deterministic parse.
+     * Legacy proposal persistence is supplemental. AI-only production jobs
+     * do not generate parser-versus-AI correction proposals.
      *
      * A temporary review-store failure must never suppress an otherwise
      * usable V2 parse result.
@@ -265,7 +267,7 @@ export function createV2ParseRouter({
 
         return res.status(200).json({
           engine: "youscan-v2",
-          authoritativeSource: "deterministic",
+          authoritativeSource: "ai",
           fileCount: publicFiles.length,
           files: publicFiles,
           transactions: aggregateV2Transactions(publicFiles),

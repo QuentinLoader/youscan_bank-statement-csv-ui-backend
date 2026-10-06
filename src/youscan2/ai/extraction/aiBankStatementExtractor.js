@@ -2,9 +2,8 @@
  * YouScan V2
  * AI bank-statement extraction runner.
  *
- * Batch 12 is shadow-only. This module can ask an AI provider for a strict
- * structured extraction candidate, but it does not merge, replace or mutate
- * deterministic parser output.
+ * Produces a strict structured AI candidate. Production uses its values
+ * directly after assessment; offline shadow tools may still compare it.
  */
 
 import { getAiConfig } from "../config.js";
@@ -16,7 +15,7 @@ import {
   validateAiBankStatementExtractionData,
 } from "./bankStatementContract.js";
 
-const EXTRACTION_SYSTEM_PROMPT = `You are the YouScan V2 bank-statement extraction engine operating in shadow mode.
+const EXTRACTION_SYSTEM_PROMPT = `You are the YouScan V2 bank-statement extraction engine.
 Extract only facts explicitly supported by the supplied statement text.
 Return every transaction in source order; do not summarize, combine, omit or invent rows.
 For transaction descriptions, preserve the source description/reference tokens in source order with whitespace normalization only. Do not silently drop embedded date codes or bank reference tokens such as ROL030726 merely because the transaction date is also returned separately.

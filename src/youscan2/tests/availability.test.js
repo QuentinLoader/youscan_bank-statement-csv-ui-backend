@@ -75,17 +75,12 @@ const config = {
   extractionMinConfidence: 0.95, extractionFieldMinConfidence: 0.95,
 };
 
-test("required AI classification failure trips health instead of becoming a document review", async () => {
+test("required AI extraction failure trips health instead of becoming a document review", async () => {
   const availability = createAnalysisAvailability({ probe: async () => {}, logger: () => {} });
   const result = await runParseJob({
     file: { originalname: "unknown.txt" }, extractedText: "Unclassified document text",
     requireAi: true, availability,
-    classificationOptions: {
-      aiConfig: { ...config, classifierEnabled: true, classificationMinConfidence: 0.92 },
-      aiProvider: { name: "mock", generateStructured: async () => {
-        throw new AiError("V2_AI_PROVIDER_FAILED", "auth", { details: { status: 401 } });
-      } },
-    },
+    shadowAiOptions: { config, provider: { name: "mock", generateStructured: async () => { throw new AiError("V2_AI_PROVIDER_FAILED", "auth", { details: { status: 401 } }); } } },
   });
   assert.equal(result.error.code, "V2_AI_UNAVAILABLE");
   assert.equal(result.result, null);
@@ -137,6 +132,6 @@ test("disabled required AI fails closed; successful AI retains the normal result
   } });
   assert.equal(success.status, "completed");
   assert.equal(success.aiCompleted, true);
-  assert.equal(success.shadowAi.ai.requestId, "req-success");
+  assert.equal(success.aiExtraction.meta.requestId, "req-success");
   assert.equal(success.result.data.transactions.length, 4);
 });

@@ -6,6 +6,46 @@ import express from "express";
 import { createV2ParseRouter } from "../api/parse.routes.js";
 import { createAnalysisAvailability, analysisUnavailableError, ANALYSIS_UNAVAILABLE_MESSAGE } from "../ai/availability.js";
 import { AiError } from "../ai/errors.js";
+import { runParseJob } from "../orchestrator/runParseJob.js";
+import { getAiConfig } from "../ai/config.js";
+import { AI_BANK_STATEMENT_SOURCE_TEXT, makeValidAiBankStatementCandidate } from "./fixtures/aiBankStatementExtraction.fixture.js";
+import { makeShadowAiEnvelope } from "./fixtures/aiBankStatementShadow.fixture.js";
+
+test("production API exposes only the assessed AI candidate and AI provenance", async () => {
+  const config = getAiConfig({ YOUSCAN_V2_AI_ENABLED: "true", YOUSCAN_V2_AI_EXTRACTION_ENABLED: "true",
+    YOUSCAN_V2_AI_PROVIDER: "openai", YOUSCAN_V2_AI_MODEL: "synthetic" });
+  const candidate = makeValidAiBankStatementCandidate();
+  const h = await makeHarness({ runJob: (args) => runParseJob({ ...args,
+    extractedText: AI_BANK_STATEMENT_SOURCE_TEXT,
+    aiOptions: { config, provider: { name: "mock", generateStructured: async () => ({
+      content: JSON.stringify(makeShadowAiEnvelope(candidate)), requestId: "synthetic",
+    }) } },
+  }) });
+  try {
+    const response = await fetch(h.url, { method: "POST", headers: headers(), body: oneFileForm() });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.authoritativeSource, "ai");
+    assert.equal(body.files[0].authoritativeSource, "ai");
+    assert.equal(body.files[0].result.authoritativeSource, "ai");
+    assert.equal(body.files[0].classification.source, "ai");
+    assert.equal(body.files[0].result.data.transactions[0].description, candidate.transactions[0].description.value);
+    assert.equal(body.files[0].review, null);
+    assert.equal(body.files[0].ai.mode, undefined);
+    assert.equal(body.billing.creditsDeducted, 0);
+  } finally { await h.close(); }
+});
+
+test("production rejects a legacy deterministic result even after successful shadow AI", async () => {
+  const h = await makeHarness({ runJob: async () => ({ ...completedResult(),
+    authoritativeSource: "deterministic", result: { ...completedResult().result, authoritativeSource: "deterministic" },
+  }) });
+  try {
+    const response = await fetch(h.url, { method: "POST", headers: headers(), body: oneFileForm() });
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).transactions, undefined);
+  } finally { await h.close(); }
+});
 
 test("availability endpoint authenticates, caches checks, and exposes only customer status", async () => {
   let probes = 0;
@@ -109,6 +149,8 @@ function completedResult({
     jobId,
     status: "completed",
     aiCompleted: true,
+    authoritativeSource: "ai",
+    aiExtraction: { status: "completed", meta: { provider: "mock" } },
     classification: {
       documentType: "bank_statement",
       documentSubtype: "fnb",
@@ -119,6 +161,7 @@ function completedResult({
     },
     result: {
       jobId,
+      authoritativeSource: "ai",
       data: canonical(),
       issues: [],
       status: "completed",
@@ -419,7 +462,7 @@ test(
 
       assert.equal(
         body.authoritativeSource,
-        "deterministic"
+        "ai"
       );
 
       assert.equal(
@@ -709,7 +752,7 @@ test(
 
       assert.equal(
         body.authoritativeSource,
-        "deterministic"
+        "ai"
       );
     } finally {
       await h.close();
