@@ -99,9 +99,10 @@ export async function runAiTask({
   validateProvider(resolvedProvider);
 
   const startedAt = Date.now();
+  let providerResponse;
 
   try {
-    const providerResponse = await callWithTimeout(
+    providerResponse = await callWithTimeout(
       resolvedProvider,
       {
         task,
@@ -151,6 +152,9 @@ export async function runAiTask({
           "YouScan V2 AI provider call failed",
           { cause: error, retryable: true, details: { providerCode: "connection_error" } }
         );
+    if (providerResponse?.requestId) {
+      normalizedError.details = { ...normalizedError.details, requestId: providerResponse.requestId };
+    }
 
     emitSafeAiLog(logger, {
       event: "v2_ai_task_failed",
