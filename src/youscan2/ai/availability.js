@@ -53,6 +53,7 @@ export function createAnalysisAvailability({
   let nextCheckAt = 0;
   let failureVersion = 0;
   let pending = null;
+  let failure = null;
 
   function snapshot() {
     return {
@@ -64,6 +65,7 @@ export function createAnalysisAvailability({
   }
 
   function recordFailure(error) {
+    failure = { code: error?.code, details: error?.details, status: error?.status };
     failureVersion += 1;
     available = false;
     checkedAt = now();
@@ -105,10 +107,15 @@ export function createAnalysisAvailability({
   }
 
   async function assertAvailable() {
-    if (!(await getAvailability()).available) throw analysisUnavailableError();
+    if (!(await getAvailability()).available) {
+      const error = analysisUnavailableError();
+      error.providerFailure = failure;
+      throw error;
+    }
   }
 
-  return { getAvailability, assertAvailable, recordFailure };
+  return { getAvailability, assertAvailable, recordFailure,
+    getCachedStatus: () => ({ ...snapshot(), stale: !checkedAt || now() >= nextCheckAt }) };
 }
 
 export const analysisAvailability = createAnalysisAvailability();

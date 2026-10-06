@@ -4,6 +4,8 @@
  * The only production extraction endpoint. Retired V1 is preserved in Git tags.
  */
 
+import { safeExtractionAudit } from "../../operations/diagnostics.js";
+import { processingTelemetry } from "../../operations/telemetry.js";
 import express from "express";
 import multer from "multer";
 import rateLimit from "express-rate-limit";
@@ -154,6 +156,7 @@ export function createV2ParseRouter({
   getReviewService = getDefaultReviewService,
   recordExportHandler = recordExport,
   availability = analysisAvailability,
+  telemetry = processingTelemetry,
 } = {}) {
   const router = express.Router();
 
@@ -166,11 +169,14 @@ export function createV2ParseRouter({
     }
   });
 
-  const requireAvailability = async (_req, res, next) => {
+  const requireAvailability = async (req, res, next) => {
+    req.processingAttempt ||= await telemetry.start("availability");
+    await telemetry.stage(req.processingAttempt, "availability");
     try {
       await availability.assertAvailable();
       next();
     } catch (error) {
+      await telemetry.finish(req.processingAttempt, { outcome: "rejected", error });
       return sendError(res, analysisUnavailableError());
     }
   };
@@ -196,14 +202,27 @@ export function createV2ParseRouter({
     "/",
     limiter,
     authenticate,
-    checkAccess,
+    async (req, res, next) => {
+      req.processingAttempt = await telemetry.start('upload');
+      const json = res.json.bind(res);
+      res.json = async body => {
+        await telemetry.finish(req.processingAttempt, { outcome: 'rejected', error: { code: body?.code, status: res.statusCode } });
+        res.json = json;
+        return json(body);
+      };
+      await checkAccess(req, res, () => { res.json = json; next(); });
+    },
     requireAvailability,
-    (req, res, next) => upload.any()(req, res, error => {
+    (req, res, next) => upload.any()(req, res, async error => {
+      if (error) {
+        await telemetry.stage(req.processingAttempt, 'upload');
+        await telemetry.finish(req.processingAttempt, { outcome: 'rejected', error });
+      }
       if (error?.code === 'LIMIT_FILE_COUNT') {
         return res.status(400).json({ error: 'V2_BATCH_LIMIT',
           message: 'Upload up to 3 statements at a time. Please split larger batches.' });
       }
-      if (error) return next(error);
+      if (error) return res.status(400).json({ error: error.code || "UPLOAD_FAILED", message: "Upload the original PDF (maximum 10 MB) and try again." });
       next();
     }),
     async (req, res) => {
@@ -211,6 +230,7 @@ export function createV2ParseRouter({
         const files = req.files || [];
 
         if (!files.length) {
+          await telemetry.finish(req.processingAttempt, { outcome: "rejected", error: { code: "NO_FILE_UPLOADED" } });
           return res.status(400).json({
             error: "NO_FILE_UPLOADED",
           });
@@ -218,8 +238,10 @@ export function createV2ParseRouter({
 
         const internalResults = [];
 
-        for (const file of files) {
+        for (const [index, file] of files.entries()) {
+          if (index) req.processingAttempt = await telemetry.start("availability");
           await availability.assertAvailable();
+          await telemetry.stage(req.processingAttempt, "pdf_reading");
           const extraction = await extractText(file, { requireAi: true });
 
           const parseResult = await runJob({
@@ -231,9 +253,15 @@ export function createV2ParseRouter({
             extractionMeta: extraction.meta,
             requireAi: true,
             availability,
+            onStage: stage => telemetry.stage(req.processingAttempt, stage),
           });
 
-          ensureUsableParse(parseResult);
+          try { ensureUsableParse(parseResult); } catch (error) {
+            await telemetry.finish(req.processingAttempt, { error, diagnostic: parseResult.diagnostic, jobId: parseResult.jobId });
+            throw error;
+          }
+          await telemetry.stage(req.processingAttempt, "completed");
+          await telemetry.finish(req.processingAttempt, { outcome: parseResult.status === "needs_review" ? "review_required" : "success", diagnostic: safeExtractionAudit(parseResult, extraction.meta), jobId: parseResult.jobId });
 
           internalResults.push({
             file,
@@ -281,6 +309,7 @@ export function createV2ParseRouter({
           billing,
         });
       } catch (error) {
+        await telemetry.finish(req.processingAttempt, { error });
         if (isProviderUnavailable(error)) {
           availability.recordFailure(error);
           error = analysisUnavailableError();

@@ -48,3 +48,8 @@ Check monthly and annual warnings at seven days, three days and exact expiry. Ex
 ## Other known limits
 
 AI may still omit or misread fields. Unsupported/malformed documents fail safely. Health is process-local. The browser is not a durable job queue. The frontend retains pre-existing repo-wide lint debt, a bundle-size warning and stale Browserslist data; focused changed-file lint, typecheck, tests and build are the current release checks. Dependency upgrades need their own compatibility review.
+
+
+## Admin operations
+
+See [Admin operations and support](ADMIN-OPERATIONS.md) for safe schema, stage/reason capture, protected routes, metric limitations, retention, migration/rollback and Vercel frontend settings. Focused tests cover privacy, one terminal outcome, logging outages, filters, support audit, permissions, cached health, separate navigation and visible-only refresh. Full extraction/export regression suites remain required.

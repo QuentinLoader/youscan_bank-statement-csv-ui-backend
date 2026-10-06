@@ -43,14 +43,8 @@ test("runParseJob logs safe stage-aware diagnostics for an uncoded failure", asy
 
   assert.equal(diagnostic.stage, "ai_extraction");
   assert.equal(diagnostic.code, "V2_PARSE_FAILED");
-  assert.equal(diagnostic.name, "Error");
-  assert.equal(diagnostic.subtype, null);
-
-  assert.equal(
-    diagnostic.message,
-    "Synthetic diagnostic failure [redacted-number] [redacted-email]"
-  );
-
-  assert.equal(diagnostic.message.includes("123456"), false);
-  assert.equal(diagnostic.message.includes("user@example.com"), false);
+  assert.equal(diagnostic.message, undefined);
+  assert.equal(diagnostic.reason, 'unspecified');
+  assert.equal(JSON.stringify(diagnostic).includes('123456'), false);
+  assert.equal(JSON.stringify(diagnostic).includes('user@example.com'), false);
 });

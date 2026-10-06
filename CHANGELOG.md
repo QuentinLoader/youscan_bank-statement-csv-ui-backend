@@ -33,3 +33,12 @@
 - AI attached-fee handling and bank-name aliases.
 - Three-file sequential batches and elapsed-time/waiting feedback.
 - Successful/resolved customer status, actionable field review, unreliable-state messaging and retained audit diagnostics.
+
+
+## 2026-10-07 - Admin operations
+
+- Separate Admin navigation preserves the original scanning tab.
+- Durable safe failure records, protected filtered viewer and audited support resolution.
+- Cached system health, extraction-outcome coverage, unique export usage and confirmed-payment/expiry summaries.
+- Bounded writes, explicit unknown/stale states, manual retention endpoint and documented frontend hosting readiness.
+- No extraction/provider/credit rules changed.

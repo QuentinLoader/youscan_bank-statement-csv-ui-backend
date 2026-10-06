@@ -57,3 +57,8 @@ Failed, cancelled, pending or duplicate callbacks must not replenish 25 credits 
 ## Rollback procedure
 
 Use a verified release tag/commit for a defect rollback while preserving AI-only behavior. Archive tags preserve old code for inspection; `archive/v1-final` is not a production rollback target. Do not reconnect `/parse` or deploy V1 to resolve an AI outage.
+
+
+## Admin operations
+
+See [Admin operations and support](ADMIN-OPERATIONS.md) for safe schema, stage/reason capture, protected routes, metric limitations, retention, migration/rollback and Vercel frontend settings. Focused tests cover privacy, one terminal outcome, logging outages, filters, support audit, permissions, cached health, separate navigation and visible-only refresh. Full extraction/export regression suites remain required.

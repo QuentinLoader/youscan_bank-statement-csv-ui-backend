@@ -47,7 +47,7 @@ test("failed AI contract logs a safe field diagnosis and request ID but returns 
   assert.equal(result.error.message, AI_EXTRACTION_FAILED_MESSAGE);
   assert.equal(result.error.code, "V2_AI_INVALID_RESPONSE");
   assert.ok(logs.some(line => line.includes('"reason":"transaction_count_mismatch"')));
-  assert.ok(logs.some(line => line.includes('"requestId":"req-synthetic"')));
+  assert.ok(logs.some(line => line.includes('"providerRequestId":"req-synthetic"')));
   assert.ok(!JSON.stringify(logs).includes("TEST CUSTOMER"));
   assert.ok(!JSON.stringify(logs).includes("62123456789"));
   assert.ok(!JSON.stringify(result.error).includes("validationIssues"));

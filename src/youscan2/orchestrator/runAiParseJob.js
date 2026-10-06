@@ -27,12 +27,14 @@ const normalizeBank = (name) => String(name || "").toLowerCase().replace(/[().,\
 
 // The production path never invokes a bank parser or compares against its data.
 // All displayed values come from this AI candidate; validation only flags issues.
-export async function runAiParseJob({ job, file, extractedText, extractionMeta, availability, aiOptions }) {
+export async function runAiParseJob({ job, file, extractedText, extractionMeta, availability, aiOptions, onStage }) {
   await availability.assertAvailable();
   const config = aiOptions?.config || getAiConfig();
+  await onStage?.("ai_extraction");
   const ai = await aiBankStatementExtractor({
     extractedText, config, provider: aiOptions?.provider, logger: aiOptions?.logger,
   });
+  await onStage?.("validation");
   const assessment = await assessAiBankStatementExtraction({
     candidate: ai.data, envelopeConfidence: ai.confidence,
     sourceText: extractedText, sourceFileName: file?.originalname || null,

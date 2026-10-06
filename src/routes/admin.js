@@ -1,3 +1,4 @@
+import { listFailures, resolveFailure, operationsOverview, cleanupOperations, uuid } from "../operations/adminOperations.js";
 import express from "express";
 import pool from "../config/db.js";
 import { authenticateUser } from "../middleware/auth.middleware.js";
@@ -153,6 +154,7 @@ export function createAdminRouter({
               SELECT COUNT(*)::int
               FROM ozow_transactions, boundaries b
               WHERE status = 'Complete'
+                AND processed_at IS NOT NULL
                 AND created_at >= b.last_14_start
             ) AS successful_payments_last_14_days,
 
@@ -306,6 +308,31 @@ export function createAdminRouter({
       }
     }
   );
+
+  const protectedOperation = handler => [authenticate, async (req, res) => {
+    try {
+      if (!await requireAdmin({ req, res, dbPool, env })) return;
+      res.set('Cache-Control', 'no-store');
+      await handler(req, res);
+    } catch {
+      console.error('ADMIN_OPERATIONS_FAILED');
+      res.status(503).json({ error: 'OPERATIONS_UNAVAILABLE', message: 'Operations data is temporarily unavailable. Try refreshing.' });
+    }
+  }];
+  router.get('/operations', ...protectedOperation(async (_req,res) => res.json(await operationsOverview(dbPool))));
+  router.get('/failures', ...protectedOperation(async (req,res) => res.json(await listFailures(dbPool,req.query))));
+  router.get('/failures/:id', ...protectedOperation(async (req,res) => {
+    if (!uuid.test(req.params.id)) return res.status(400).json({ error: 'INVALID_REFERENCE' });
+    const record = await dbPool.query("SELECT * FROM processing_attempts WHERE id=$1 AND outcome IN ('failed','rejected')", [req.params.id]);
+    if (!record.rows.length) return res.status(404).json({ error: 'FAILURE_NOT_FOUND' });
+    const history = await dbPool.query('SELECT changed_at,actor_id,previous_state,new_state,reason FROM processing_resolution_history WHERE attempt_id=$1 ORDER BY changed_at,id', [req.params.id]);
+    res.json({ ...record.rows[0], history: history.rows });
+  }));
+  router.post('/failures/:id/resolution', express.json({ limit: '2kb' }), ...protectedOperation(async (req,res) => {
+    const result = await resolveFailure(dbPool, { id: req.params.id, actor: req.user.userId, state: req.body?.state, reason: req.body?.reason });
+    res.status(result.status).json(result);
+  }));
+  router.post('/operations/cleanup', ...protectedOperation(async (_req,res) => res.json(await cleanupOperations(dbPool, env.OPERATIONS_RETENTION_DAYS || 90))));
 
   return router;
 }

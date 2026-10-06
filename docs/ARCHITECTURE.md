@@ -38,3 +38,8 @@ The browser accepts at most three statements and sends them sequentially, one fi
 Only first successful export consumes commercial allowance. Parsing, failed extraction, review, discard and repeat export do not consume allowance. Existing payment and account behavior is preserved.
 
 Logs use reason codes, request IDs, counts, timings and statuses. Do not log documents, financial values, account identifiers, transaction descriptions or credentials. Review persistence requires application encryption and user ownership checks.
+
+
+## Admin operations
+
+See [Admin operations and support](ADMIN-OPERATIONS.md) for safe schema, stage/reason capture, protected routes, metric limitations, retention, migration/rollback and Vercel frontend settings. Focused tests cover privacy, one terminal outcome, logging outages, filters, support audit, permissions, cached health, separate navigation and visible-only refresh. Full extraction/export regression suites remain required.

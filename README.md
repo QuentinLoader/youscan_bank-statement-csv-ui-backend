@@ -52,3 +52,8 @@ Paid monthly and annual terms require a new confirmed payment to renew. Expiry u
 `archive/v1-final` preserves old V1 at `20dc938`. `archive/v2-before-production-cleanup` preserves the complete pre-cleanup V2 checkpoint including retired bank extraction code and its tests. Tags are historical references, not deployed branches. Production has no bank-specific deterministic extractor or heuristic bank-classification path.
 
 The encrypted review/audit compatibility layer retains historical proposal structures for support. Its presence does not make legacy extraction executable. Schema names ending in `.v1` describe wire-schema versions, not an alternate application version.
+
+
+## Admin operations release (7 October 2026)
+
+Admin opens separately from scanning. A protected failure viewer and operational dashboard use safe structured Railway Postgres records. Extraction remains AI-only and export charging is unchanged. [Operations/support reference](docs/ADMIN-OPERATIONS.md).
