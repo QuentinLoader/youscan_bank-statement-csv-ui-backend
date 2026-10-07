@@ -1,8 +1,8 @@
 # Change history
 
-## Pending release - Administrator management (7 October 2026)
+## 7 October 2026 - Administrator management
 
-Implemented on `codex/administrator-management`; **not deployed**. Production/main remain unchanged until explicit deployment approval.
+Administrator management is implemented and tested. Explicit production deployment confirmation is pending. Backend/schema must be released before the frontend.
 
 - Added verified database-managed administrators with protected `YOUSCAN_ADMIN_EMAILS` bootstrap/break-glass authority. Admin Users now grants/revokes access with atomic privilege audit and final-admin lockout protection.
 - Effective admins receive unlimited processing/exports without changing their commercial plan, credits or renewal date. Revocation restores the underlying plan for new requests immediately.

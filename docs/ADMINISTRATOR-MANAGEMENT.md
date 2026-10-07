@@ -1,6 +1,6 @@
 # Administrator management
 
-**Prepared release, pending explicit production deployment approval.** This supplements the existing Admin operations dashboard. `main` remains the production source; the implementation is on `codex/administrator-management` until approved.
+Administrator management is implemented and tested; explicit production deployment confirmation is pending. This extends the existing Admin operations dashboard. `main` is the production source of truth.
 
 ## Authority and security
 

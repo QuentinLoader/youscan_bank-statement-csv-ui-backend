@@ -52,6 +52,6 @@ The committed frontend vercel.json uses Vite dist and SPA index fallback. Set VI
 
 Only the frontend migration is prepared; hosting/domains are unchanged. Moving the backend separately would require evaluating upload limits, long-running AI tasks, native PDF tooling, pooling and shared provider state. Official SPA guidance: https://vercel.com/docs/frameworks/frontend/vite
 
-## Prepared administrator management (deployment pending)
+## Administrator management
 
-The approved feature branch extends Admin Users beyond the email directory. Effective authority becomes verified bootstrap-email or database membership, checked by the backend. Users includes grant/revoke confirmation and privilege history; Usage separates no-credit administrator exports from paid Pro exports. The pre-deploy script also applies `src/administration/schema.sql`. This is not live until explicit deployment approval; [Administrator management](ADMINISTRATOR-MANAGEMENT.md) defines security, entitlement and rollout details.
+Admin Users extends beyond the email directory. Effective authority becomes verified bootstrap-email or database membership, checked by the backend. Users includes grant/revoke confirmation and privilege history; Usage separates no-credit administrator exports from paid Pro exports. The pre-deploy script also applies `src/administration/schema.sql`. Explicit production deployment confirmation is pending; [Administrator management](ADMINISTRATOR-MANAGEMENT.md) defines security, entitlement and rollout details.

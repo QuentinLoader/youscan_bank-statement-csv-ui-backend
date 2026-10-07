@@ -63,6 +63,6 @@ Admin opens separately from scanning. Safe structured failure records and suppor
 
 GitHub holds source, Railway runs the backend and database, and Lovable currently hosts the frontend. Vercel frontend configuration is prepared; hosting has not moved. Admin provider status reads cached availability without a new AI probe.
 
-## Prepared administrator-management release
+## Administrator management
 
-Production approval is pending. The feature branch adds database-managed verified admins, protected bootstrap/final-admin authority, audited Users grant/revoke actions and an unlimited administrator entitlement that preserves the stored commercial plan. See [security, APIs, migration and acceptance](docs/ADMINISTRATOR-MANAGEMENT.md). Do not merge/deploy this branch or run production migrations until explicitly approved.
+The administrator release adds database-managed verified admins, protected bootstrap/final-admin authority, audited Users grant/revoke actions and an unlimited administrator entitlement that preserves the stored commercial plan. See [security, APIs, migration and acceptance](docs/ADMINISTRATOR-MANAGEMENT.md). Release backend/schema before frontend; subsequent production deployments require explicit approval.
