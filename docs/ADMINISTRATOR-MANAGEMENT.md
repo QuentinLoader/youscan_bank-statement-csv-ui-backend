@@ -1,6 +1,6 @@
 # Administrator management
 
-Administrator management is implemented and tested; explicit production deployment confirmation is pending. This extends the existing Admin operations dashboard. `main` is the production source of truth.
+Administrator-management production deployment approved on 7 October 2026. This extends the existing Admin operations dashboard. `main` is the production source of truth.
 
 ## Authority and security
 

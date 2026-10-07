@@ -54,4 +54,4 @@ Only the frontend migration is prepared; hosting/domains are unchanged. Moving t
 
 ## Administrator management
 
-Admin Users extends beyond the email directory. Effective authority becomes verified bootstrap-email or database membership, checked by the backend. Users includes grant/revoke confirmation and privilege history; Usage separates no-credit administrator exports from paid Pro exports. The pre-deploy script also applies `src/administration/schema.sql`. Explicit production deployment confirmation is pending; [Administrator management](ADMINISTRATOR-MANAGEMENT.md) defines security, entitlement and rollout details.
+Admin Users extends beyond the email directory. Effective authority becomes verified bootstrap-email or database membership, checked by the backend. Users includes grant/revoke confirmation and privilege history; Usage separates no-credit administrator exports from paid Pro exports. The pre-deploy script also applies `src/administration/schema.sql`. Production deployment was explicitly approved on 7 October 2026; [Administrator management](ADMINISTRATOR-MANAGEMENT.md) defines security, entitlement and rollout details.
