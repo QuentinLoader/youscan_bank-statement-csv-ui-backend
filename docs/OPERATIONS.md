@@ -17,13 +17,17 @@
 | `OZOW_SITE_CODE`, `OZOW_PRIVATE_KEY`, `OZOW_ALLOW_TEST_PAYMENTS` | Existing payment/webhook settings |
 | `YOUSCAN_ADMIN_EMAILS` | Existing server-side administration allowlist |
 | `YOUSCAN_V2_REVIEW_PERSISTENCE_ENABLED`, `YOUSCAN_V2_REVIEW_ENCRYPTION_KEY` | Optional encrypted review persistence; key must decode to 32 bytes |
+| `OPERATIONS_RETENTION_DAYS` | Operational cleanup policy, default 90; range 30-365; manual or externally scheduled cleanup |
+| `FRONTEND_ALLOWED_ORIGINS` | Additional exact HTTPS frontend origins for future hosting migration |
 | `PORT` | Listener, default 8080 |
 
-The retired classifier flag does not control current AI extraction and is not required by readiness checks. Review encryption/database checks remain required by the admin cutover-readiness report. This cleanup needs no database migration or secret rotation.
+The retired classifier flag does not control current AI extraction and is not required by readiness checks. Review encryption/database checks remain required by the admin cutover-readiness report. The current Admin release requires the additive operational schema migration below. No secret rotation is required by this repository cleanup.
 
 ## Release
 
 Both repositories use `main`. Push tested commits; configure Railway backend source to `QuentinLoader/youscan_bank-statement-csv-ui-backend`, branch `main`. Frontend source is `QuentinLoader/youscan-finance-frontend`, branch `main`; production publishing is through the existing Lovable project, with custom domain `youscan.addvision.co.za`.
+
+Railway pre-deploy runs `node scripts/migrate-operations.js` on each release. It creates the operational tables idempotently and verifies dashboard queries before new code starts. A failed migration stops the release; do not drop the tables during rollback. For local database setup, run this command before using Admin operations.
 
 Confirm the exact commit in Railway and successful startup. Check `/health/routes`, confirm `/api/v2/parse` is listed and `/parse` is absent, then perform authenticated availability and original-statement acceptance tests. For the frontend, verify the published asset and visible status text. A push alone is not deployment verification.
 
@@ -62,3 +66,8 @@ Use a verified release tag/commit for a defect rollback while preserving AI-only
 ## Admin operations
 
 See [Admin operations and support](ADMIN-OPERATIONS.md) for safe schema, stage/reason capture, protected routes, metric limitations, retention, migration/rollback and Vercel frontend settings. Focused tests cover privacy, one terminal outcome, logging outages, filters, support audit, permissions, cached health, separate navigation and visible-only refresh. Full extraction/export regression suites remain required.
+
+
+## Documentation and repository maintenance
+
+`README.md` indexes current operating documents; `CHANGELOG.md` and `docs/history/` record prior releases rather than current configuration. Keep `main` aligned with `origin/main`. Git archive tags preserve retired implementations; they are not active release branches. Keep private statements, exports, temporary diagnostics and secrets outside versioned repositories. Do not delete commercial records, operational evidence or customer history as part of source cleanup.

@@ -24,7 +24,7 @@ Focused status tests cover success/resolved, unresolved field navigation and unr
 
 For each supported bank/layout, compare the original PDF with the extracted result and CSV: row count, descriptions, dates, signs, payment/fee treatment, opening/closing balances and page completeness. Inspect repeated/zero rows and summaries separately. Arithmetic agreement alone does not prove row accuracy.
 
-Priority specimens: FNB 4 brand/legal footer recognition; Gold Business Account 43 source-table row count and accrued charges; Capitec attached fees; ABSA identity; Standard Bank descriptions/signs. Nedbank and Discovery require current AI-only live acceptance too.
+Priority specimens: FNB 4 brand/legal footer recognition; Gold Business Account 43 source-table row count and accrued charges; Capitec attached fees; ABSA identity; Standard Bank descriptions/signs. Nedbank was recognised by AI and its latest request returned successfully on 7 October 2026; this is processing verification, not private original-to-CSV accuracy acceptance. Nedbank and Discovery still require that financial accuracy check.
 
 Test one statement first, then a batch of two or three. Verify a document failure preserves the other results and a provider outage stops the batch. A smaller batch does not solve one slow document; assess per-file duration separately.
 

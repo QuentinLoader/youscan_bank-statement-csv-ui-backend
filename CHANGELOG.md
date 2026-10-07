@@ -1,5 +1,11 @@
 # Change history
 
+## 7 October 2026 - Repository and documentation close-out
+
+- Confirmed main is the only active branch and aligned local/GitHub repositories.
+- Consolidated current feature, support, retention, hosting and commercial rules; separated historical release notes.
+- Corrected current Admin migration requirements and clarified that failure records persist through restarts and do not backfill old errors.
+
 ## 6 October 2026 — Manual renewal and expiry
 
 - Monthly and annual pricing now identifies manual payment renewal; prices are unchanged.

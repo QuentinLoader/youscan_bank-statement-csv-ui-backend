@@ -32,6 +32,7 @@ Use Node 20 or newer and npm. Copy `.env.example` to a local `.env`, supply the 
 ```sh
 npm ci
 npm test
+node scripts/migrate-operations.js
 npm start
 ```
 
@@ -45,7 +46,9 @@ Paid monthly and annual terms require a new confirmed payment to renew. Expiry u
 - [Configuration, deployment and support runbook](docs/OPERATIONS.md)
 - [QA and release acceptance](docs/QA.md)
 - [Commercial plans and manual renewal](docs/COMMERCIAL-PLANS.md)
+- [Admin failures, metrics, retention and support](docs/ADMIN-OPERATIONS.md)
 - [Change history](CHANGELOG.md)
+- [Historical cleanup record](docs/history/2026-10-06-production-cleanup.md)
 
 ## Historical code
 
@@ -54,6 +57,8 @@ Paid monthly and annual terms require a new confirmed payment to renew. Expiry u
 The encrypted review/audit compatibility layer retains historical proposal structures for support. Its presence does not make legacy extraction executable. Schema names ending in `.v1` describe wire-schema versions, not an alternate application version.
 
 
-## Admin operations release (7 October 2026)
+## Admin and hosting
 
-Admin opens separately from scanning. A protected failure viewer and operational dashboard use safe structured Railway Postgres records. Extraction remains AI-only and export charging is unchanged. [Operations/support reference](docs/ADMIN-OPERATIONS.md).
+Admin opens separately from scanning. Safe structured failure records and support-resolution history live in Railway Postgres and survive backend restarts. Records begin at the Admin rollout; previous errors are not imported. The default 90-day operational policy is enforced by a protected cleanup endpoint called manually or by an external scheduler, not an automatic TTL. Payment/export/account history is separate.
+
+GitHub holds source, Railway runs the backend and database, and Lovable currently hosts the frontend. Vercel frontend configuration is prepared; hosting has not moved. Admin provider status reads cached availability without a new AI probe.

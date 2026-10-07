@@ -1,4 +1,5 @@
 import { summarizeAiValidationIssues } from '../youscan2/ai/validationDiagnostics.js';
+import { V2_RECOGNIZED_BANK_SUBTYPES } from '../youscan2/registry/bankSupport.js';
 
 const codes = new Set(['V2_AI_UNAVAILABLE','V2_AI_PROVIDER_FAILED','V2_AI_PROVIDER_INCOMPLETE',
   'V2_AI_TIMEOUT','V2_AI_INPUT_TOO_LARGE','V2_AI_CONFIG_INVALID','V2_AI_DISABLED','V2_AI_PROVIDER_INVALID',
@@ -43,6 +44,6 @@ export function safeExtractionAudit(parseResult, extractionMeta) {
   const subtype = parseResult?.classification?.documentSubtype;
   return { warnings: issues, validationScore: unit(parseResult?.result?.validationScore), confidence: unit(parseResult?.aiExtraction?.confidence),
     classificationConfidence: unit(parseResult?.classification?.confidence),
-    source: 'ai', bank: ['absa_statement','capitec_statement','fnb_statement','standard_bank_statement','discovery_statement'].includes(subtype) ? subtype : 'unknown',
+    source: 'ai', bank: V2_RECOGNIZED_BANK_SUBTYPES.includes(subtype) ? subtype : 'unknown',
     pageCount: Number.isInteger(extractionMeta?.pages) && extractionMeta.pages > 0 ? extractionMeta.pages : null };
 }

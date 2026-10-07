@@ -7,6 +7,7 @@ import { failureFilter, resolveFailure, cleanupOperations, operationsOverview } 
 import { createAdminRouter } from '../../routes/admin.js';
 import { createV2ParseRouter } from '../api/parse.routes.js';
 import { createAnalysisAvailability } from '../ai/availability.js';
+import { V2_RECOGNIZED_BANK_SUBTYPES } from '../registry/bankSupport.js';
 
 const id = '11111111-1111-4111-8111-111111111111';
 test('diagnostics exclude arbitrary messages, values, secrets and provider strings', () => {
@@ -26,6 +27,12 @@ test('safe audit retains warning/confidence metadata without monetary data or fi
     result:{issues:[{issueType:'low_field_confidence',fieldPath:'transactions[2].amount',confidence:0.7,value:999, evidence:'PRIVATE',message:'PRIVATE'}]} }, {pages:3});
   assert.equal(result.warnings[0].confidence,0.7); assert.equal(result.pageCount,3);
   assert.equal(JSON.stringify(result).includes('PRIVATE'),false); assert.equal(JSON.stringify(result).includes('999'),false);
+});
+test('audit uses the supported bank registry including Nedbank without retaining unknown identity text', () => {
+  for (const documentSubtype of V2_RECOGNIZED_BANK_SUBTYPES) {
+    assert.equal(safeExtractionAudit({ classification: { documentSubtype } }).bank, documentSubtype);
+  }
+  assert.equal(safeExtractionAudit({ classification: { documentSubtype: 'PRIVATE' } }).bank, 'unknown');
 });
 test('telemetry records stages and one terminal outcome without filenames or documents', async () => {
   const calls=[];let clock=1000;

@@ -1,3 +1,5 @@
+> Historical release record. For current behavior and release checks, use README.md and the current operations/QA guides.
+
 # Production cleanup verification — 6 October 2026
 
 ## Included checkpoints

@@ -2,9 +2,9 @@
  * YouScan V2
  * Bank support registry.
  *
- * Batch 01 intentionally marks only the bank parsers that are genuinely
- * implemented inside V2 as supported. Other known banks remain detectable,
- * but are not allowed to fall through to another bank's extractor.
+ * The AI-derived bank identity is mapped to this supported registry.
+ * These labels are a routing contract, not bank-specific extractors.
+ * Recognition alone does not prove every layout's financial accuracy.
  */
 
 import { DOCUMENT_SUBTYPES } from "./documentTypes.js";
