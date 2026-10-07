@@ -5,7 +5,7 @@ import crypto from "crypto";
 import pool from "../config/db.js";
 import { authenticateUser } from "../middleware/auth.middleware.js";
 import { sendVerificationEmail, sendPasswordResetEmail } from "../utils/email.js";
-import { isAdminEmail } from "../utils/adminAccess.js";
+import { getAdministratorAccess } from "../administration/access.js";
 import { AccountServiceError, changePasswordForUser, resendVerificationForUser } from "../services/account.service.js";
 
 const router = express.Router();
@@ -286,6 +286,7 @@ router.post("/login", async (req, res) => {
    GET CURRENT USER
 ============================ */
 router.get("/me", authenticateUser, async (req, res) => {
+  res.set("Cache-Control", "no-store");
   try {
     const result = await pool.query(
       `SELECT id, email,
@@ -307,7 +308,9 @@ router.get("/me", authenticateUser, async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
+    const access = await getAdministratorAccess({ user, dbPool:pool });
     const lowCreditWarning =
+      !access.is_admin &&
       user.plan_code !== "PRO_YEAR_UNLIMITED" &&
       (
         (user.plan_code === "FREE" && user.lifetime_parses_used >= 13) ||
@@ -317,7 +320,7 @@ router.get("/me", authenticateUser, async (req, res) => {
 
     res.json({
       ...user,
-      is_admin: isAdminEmail(user.email),
+      ...access,
       low_credit_warning: lowCreditWarning
     });
 

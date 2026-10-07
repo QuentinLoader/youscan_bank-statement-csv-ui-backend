@@ -1,15 +1,16 @@
+import { getAdministratorAccess } from "../administration/access.js";
 import pool from "../config/db.js";
 
 /**
  * Middleware to verify if a user has an active plan or enough credits 
  * to perform a protected action (like parsing a statement).
  */
-export const checkPlanAccess = async (req, res, next) => {
+export const createPlanAccess = ({ dbPool = pool, env = process.env } = {}) => async (req, res, next) => {
   try {
     const userId = req.user.userId;
 
-    const result = await pool.query(
-      `SELECT id,
+    const result = await dbPool.query(
+      `SELECT id, email,
               plan_code,
               credits_remaining,
               lifetime_parses_used,
@@ -39,6 +40,9 @@ export const checkPlanAccess = async (req, res, next) => {
         message: "Please verify your email before using YouScan."
       });
     }
+
+    const access = await getAdministratorAccess({ user, dbPool, env });
+    if (access.is_admin) { req.userRecord = { ...user, ...access }; return next(); }
 
     const now = new Date();
     // Ensure credits_remaining is never treated as null during math
@@ -140,3 +144,4 @@ export const checkPlanAccess = async (req, res, next) => {
     });
   }
 };
+export const checkPlanAccess = createPlanAccess();

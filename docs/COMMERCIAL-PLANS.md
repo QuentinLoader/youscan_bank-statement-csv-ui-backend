@@ -30,3 +30,7 @@ Parsing still consumes no allowance. First successful export consumes allowance,
 ## Validation
 
 Synthetic tests cover exact expiry, missing/invalid dates, inactive status, preservation of plan/lifetime usage, failed/pending/cancelled payments, successful renewal, webhook replay, transaction ownership and warning boundaries. A real paid renewal is a separate manual acceptance check; do not charge an account merely to run an automated test.
+
+## Prepared administrator entitlement (deployment pending)
+
+Effective verified administrators receive a separate unlimited entitlement without a new plan code or paid Pro subscription. No FREE allowance/paid credit is consumed and expiry does not block them. Commercial subscription/credit/renewal metadata remains intact and applies immediately to new requests after revocation. Administrator usage is classified separately from commercial exports and confirmed payment revenue. Only normal verified Ozow payment events alter the underlying purchased term. See [Administrator management](ADMINISTRATOR-MANAGEMENT.md).

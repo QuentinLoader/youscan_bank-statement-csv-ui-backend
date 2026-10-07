@@ -53,3 +53,7 @@ AI may still omit or misread fields. Unsupported/malformed documents fail safely
 ## Admin operations
 
 See [Admin operations and support](ADMIN-OPERATIONS.md) for safe schema, stage/reason capture, protected routes, metric limitations, retention, migration/rollback and Vercel frontend settings. Focused tests cover privacy, one terminal outcome, logging outages, filters, support audit, permissions, cached health, separate navigation and visible-only refresh. Full extraction/export regression suites remain required.
+
+## Administrator management - pending release
+
+Run `npm test`; CI supplies isolated PostgreSQL 16 through `ADMIN_TEST_DATABASE_URL` for migration replay, concurrent final-admin protection and export separation. Local runs without this setting explicitly skip the engine test. Focused security tests cover unverified/unauthorized/stale-role requests, bootstrap/final-admin rejection, atomic audit rollback, unchanged stored plans/credits, expiry bypass and restoration after revocation. Frontend acceptance checks confirmation/errors, separate-tab Admin, no upgrade/renewal prompts and transient profile-refresh outages. See [acceptance steps](ADMINISTRATOR-MANAGEMENT.md). Production acceptance requires deployment approval first.

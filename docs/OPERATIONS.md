@@ -71,3 +71,9 @@ See [Admin operations and support](ADMIN-OPERATIONS.md) for safe schema, stage/r
 ## Documentation and repository maintenance
 
 `README.md` indexes current operating documents; `CHANGELOG.md` and `docs/history/` record prior releases rather than current configuration. Keep `main` aligned with `origin/main`. Git archive tags preserve retired implementations; they are not active release branches. Keep private statements, exports, temporary diagnostics and secrets outside versioned repositories. Do not delete commercial records, operational evidence or customer history as part of source cleanup.
+
+## Administrator support - prepared release, not deployed
+
+Use Admin Users to manage verified database grants; keep `YOUSCAN_ADMIN_EMAILS` as protected bootstrap/break-glass authority. `USER_NOT_VERIFIED` requires normal email verification. `BOOTSTRAP_ADMIN_PROTECTED` requires a reviewed server-configuration change, not a UI revoke. `FINAL_ADMIN_PROTECTED` requires another effective verified administrator before removing the last database grant. `FORBIDDEN` after revocation is expected; refresh account state. Audit/membership outages must not produce partial successful changes.
+
+Admin unlimited access preserves original plan/credits/expiry. After revocation, an expired or exhausted original plan can legitimately block new processing/first exports. Browser role displays refresh within 30 seconds while visible/on focus; a temporary refresh outage can leave a stale label, but the server still enforces current access. Existing admitted scans are not cancelled. Privilege audits are outside operational failure retention. Review [the complete migration and recovery runbook](ADMINISTRATOR-MANAGEMENT.md) before any approved release.

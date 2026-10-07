@@ -1,3 +1,4 @@
+import { getAdministratorAccess } from "../administration/access.js";
 import pool from "../config/db.js";
 
 export class BillingStatusError extends Error {
@@ -9,7 +10,7 @@ export class BillingStatusError extends Error {
   }
 }
 
-export function shapeBillingStatus(user, { now = new Date() } = {}) {
+export function shapeBillingStatus(user, { now = new Date(), administratorAccess = { is_admin:false, admin_unlimited:false } } = {}) {
   if (!user) throw new BillingStatusError("USER_NOT_FOUND", "User account not found.", 404);
 
   let lifetimeRemaining = null;
@@ -36,6 +37,7 @@ export function shapeBillingStatus(user, { now = new Date() } = {}) {
   }
 
   return {
+    ...administratorAccess,
     plan_code: user.plan_code,
     credits_remaining: creditsRemaining,
     lifetime_remaining: lifetimeRemaining,
@@ -60,12 +62,15 @@ export async function getPaymentConfirmation({ userId, reference, dbPool = pool 
     plan_code: payment?.plan_code || null };
 }
 
-export async function getBillingStatusForUser({ userId, dbPool = pool, now = new Date() } = {}) {
+export async function getBillingStatusForUser({ userId, dbPool = pool, now = new Date(), env = process.env } = {}) {
   const result = await dbPool.query(
-    `SELECT plan_code, credits_remaining, lifetime_parses_used,
+    `SELECT id, email, is_verified, plan_code, credits_remaining, lifetime_parses_used,
             subscription_status, renewal_date, billing_cycle_end
      FROM users WHERE id = $1 LIMIT 1`,
     [userId]
   );
-  return shapeBillingStatus(result.rows[0], { now });
+  const user = result.rows[0];
+  if (!user) throw new BillingStatusError("USER_NOT_FOUND", "User account not found.", 404);
+  const administratorAccess = await getAdministratorAccess({ user, userId, dbPool, env });
+  return shapeBillingStatus(user, { now, administratorAccess });
 }

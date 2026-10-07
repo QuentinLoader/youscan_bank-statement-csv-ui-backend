@@ -62,9 +62,10 @@ export async function operationsOverview(db) {
     (SELECT count(*)::int FROM users WHERE plan_code IN ('MONTHLY_25','PRO_YEAR_UNLIMITED') AND (renewal_date IS NULL OR renewal_date<=now())) AS expired_subscriptions,
     (SELECT count(*)::int FROM users WHERE plan_code IN ('MONTHLY_25','PRO_YEAR_UNLIMITED') AND renewal_date>now() AND renewal_date<=now()+interval '7 days') AS expiring_subscriptions`);
   const exports = await db.query(`SELECT count(*)::int AS first_exports,
-    count(*) FILTER(WHERE plan_code='FREE')::int AS free_allowances,
-    count(*) FILTER(WHERE plan_code IN ('PAYG_10','MONTHLY_25'))::int AS paid_credit_exports,
-    count(*) FILTER(WHERE plan_code='PRO_YEAR_UNLIMITED')::int AS unlimited_exports
+    count(*) FILTER(WHERE entitlement_source='administrator')::int AS administrator_exports,
+    count(*) FILTER(WHERE entitlement_source='commercial' AND plan_code='FREE')::int AS free_allowances,
+    count(*) FILTER(WHERE entitlement_source='commercial' AND plan_code IN ('PAYG_10','MONTHLY_25'))::int AS paid_credit_exports,
+    count(*) FILTER(WHERE entitlement_source='commercial' AND plan_code='PRO_YEAR_UNLIMITED')::int AS unlimited_exports
     FROM v2_export_ledger WHERE exported_at >= now()-interval '14 days'`);
   return { checkedAt: new Date().toISOString(), database: 'healthy', telemetry: telemetryHealth(),
     provider: analysisAvailability.getCachedStatus(), build: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0,40) || 'unknown',

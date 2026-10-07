@@ -1,3 +1,5 @@
+import { getAdministratorAccess } from "../administration/access.js";
+import { changeAdministrator, listAdministratorUsers, AdministratorError } from "../administration/service.js";
 import { listFailures, resolveFailure, operationsOverview, cleanupOperations, uuid } from "../operations/adminOperations.js";
 import express from "express";
 import pool from "../config/db.js";
@@ -6,16 +8,7 @@ import { configuredAdminEmails } from "../utils/adminAccess.js";
 import { buildCutoverReadiness } from "../youscan2/cutover/readiness.js";
 
 async function requireAdmin({ req, res, dbPool, env }) {
-  const meResult = await dbPool.query(
-    `SELECT email FROM users WHERE id = $1 LIMIT 1`,
-    [req.user.userId]
-  );
-
-  const myEmail = String(meResult.rows[0]?.email || "")
-    .trim()
-    .toLowerCase();
-
-  if (!configuredAdminEmails(env).has(myEmail)) {
+  if (!(await getAdministratorAccess({ userId:req.user.userId, dbPool, env })).is_admin) {
     res.status(403).json({ error: "FORBIDDEN" });
     return false;
   }
@@ -108,6 +101,7 @@ export function createAdminRouter({
   env = process.env,
 } = {}) {
   const router = express.Router();
+  router.use((_req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
 
   router.get(
     "/metrics",
@@ -209,13 +203,7 @@ export function createAdminRouter({
     }
   );
 
-  /*
-   * Registered users.
-   *
-   * Deliberately returns email addresses only.
-   * No plan, credit, auth, payment or profile
-   * information is exposed by this endpoint.
-   */
+  // Minimal private directory for verified administrator management; never return credentials.
   router.get(
     "/users",
     authenticate,
@@ -232,19 +220,7 @@ export function createAdminRouter({
           return;
         }
 
-        const result = await dbPool.query(`
-          SELECT email
-          FROM users
-          WHERE email IS NOT NULL
-            AND BTRIM(email) <> ''
-          ORDER BY LOWER(email) ASC
-        `);
-
-        return res.json({
-          users: result.rows.map((row) => ({
-            email: String(row.email),
-          })),
-        });
+        return res.set('Cache-Control','no-store').json(await listAdministratorUsers(dbPool, env));
       } catch (error) {
         console.error(
           "Admin users error:",
@@ -308,6 +284,23 @@ export function createAdminRouter({
       }
     }
   );
+
+  router.post('/users/:id/administrator', express.json({limit:'2kb'}), authenticate, async (req,res) => {
+    res.set('Cache-Control','no-store');
+    try {
+      return res.json(await changeAdministrator({dbPool,env,actorId:req.user.userId,targetId:req.params.id,action:req.body?.action}));
+    } catch (error) {
+      return res.status(error instanceof AdministratorError ? error.status : 503).json({error:error instanceof AdministratorError ? error.code : 'ADMINISTRATOR_CHANGE_FAILED'});
+    }
+  });
+  router.get('/privilege-audit', authenticate, async (req,res) => {
+    try {
+      if (!await requireAdmin({req,res,dbPool,env})) return;
+      const page=Math.min(10000,Math.max(1,parseInt(req.query.page,10)||1));
+      const result=await dbPool.query('SELECT id,actor_id,target_id,action,changed_at FROM administrator_privilege_audit ORDER BY changed_at DESC,id DESC LIMIT 25 OFFSET $1',[(page-1)*25]);
+      res.set('Cache-Control','no-store').json({items:result.rows,page,pageSize:25});
+    } catch { res.status(503).json({error:'PRIVILEGE_AUDIT_UNAVAILABLE'}); }
+  });
 
   const protectedOperation = handler => [authenticate, async (req, res) => {
     try {

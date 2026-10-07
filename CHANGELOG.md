@@ -1,5 +1,14 @@
 # Change history
 
+## Pending release - Administrator management (7 October 2026)
+
+Implemented on `codex/administrator-management`; **not deployed**. Production/main remain unchanged until explicit deployment approval.
+
+- Added verified database-managed administrators with protected `YOUSCAN_ADMIN_EMAILS` bootstrap/break-glass authority. Admin Users now grants/revokes access with atomic privilege audit and final-admin lockout protection.
+- Effective admins receive unlimited processing/exports without changing their commercial plan, credits or renewal date. Revocation restores the underlying plan for new requests immediately.
+- Added separate administrator export/usage classification, private paged privilege history, additive pre-deploy migration and focused security/entitlement tests. CI now verifies the schema and concurrent revocations against isolated PostgreSQL 16.
+- Frontend privilege refresh preserves active sessions during transient network failures. No extraction/validation behavior or production hosting changed.
+
 ## 7 October 2026 - Repository and documentation close-out
 
 - Confirmed main is the only active branch and aligned local/GitHub repositories.

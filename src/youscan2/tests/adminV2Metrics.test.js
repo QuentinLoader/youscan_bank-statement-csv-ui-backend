@@ -14,17 +14,19 @@ function fakePool({
 
       if (
         text.includes(
-          "SELECT email FROM users WHERE id = $1 LIMIT 1"
+          "SELECT id, email, is_verified FROM users WHERE id=$1 LIMIT 1"
         )
       ) {
         return {
-          rows: [{ email }],
+          rows: [{ id:42, email, is_verified:true }],
         };
       }
 
+      if (text.includes('SELECT user_id FROM administrator_memberships')) return {rows:[]};
+
       if (
         text.includes(
-          "ORDER BY LOWER(email) ASC"
+          "LEFT JOIN administrator_memberships"
         )
       ) {
         return {
@@ -320,7 +322,7 @@ test(
 );
 
 test(
-  "Admin registered users endpoint returns email addresses only",
+  "Admin directory exposes management fields but never credentials",
   async () => {
     const h =
       await harness();
@@ -339,21 +341,9 @@ test(
       const body =
         await response.json();
 
-      assert.deepEqual(
-        body,
-        {
-          users: [
-            {
-              email:
-                "alpha@example.test",
-            },
-            {
-              email:
-                "bravo@example.test",
-            },
-          ],
-        }
-      );
+      assert.equal(body.users.length, 2);
+      assert.equal(body.users[0].email, 'alpha@example.test');
+      assert.equal(body.users[0].is_admin, false);
 
       const serialized =
         JSON.stringify(body);
@@ -368,13 +358,6 @@ test(
       assert.equal(
         serialized.includes(
           "credits_remaining"
-        ),
-        false
-      );
-
-      assert.equal(
-        serialized.includes(
-          "plan_code"
         ),
         false
       );

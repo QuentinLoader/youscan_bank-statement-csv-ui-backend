@@ -1,3 +1,4 @@
+import { getAdministratorAccess, ADMINISTRATOR_LOCK } from "../administration/access.js";
 import pool from "../config/db.js";
 
 const FREE_LIMIT = 15;
@@ -7,7 +8,8 @@ function cleanText(value, maxLength) {
   return text ? text.slice(0, maxLength) : null;
 }
 
-export async function recordExport(req, res) {
+export function createRecordExport({ dbPool=pool, env=process.env } = {}) {
+return async function recordExport(req, res) {
   if (!req.user?.userId) {
     return res.status(401).json({ error: "Unauthorized" });
   }
@@ -25,10 +27,11 @@ export async function recordExport(req, res) {
     });
   }
 
-  const client = await pool.connect();
+  const client = await dbPool.connect();
 
   try {
     await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock_shared($1)", [ADMINISTRATOR_LOCK]);
 
     /*
      * Lock the user first.
@@ -39,10 +42,10 @@ export async function recordExport(req, res) {
     const userResult = await client.query(
       `
       SELECT
-        id,
+        id, email, is_verified,
         plan_code,
         credits_remaining,
-        lifetime_parses_used
+        lifetime_parses_used, subscription_status, renewal_date
       FROM users
       WHERE id = $1
       FOR UPDATE
@@ -56,6 +59,8 @@ export async function recordExport(req, res) {
     }
 
     const user = userResult.rows[0];
+    const administratorAccess = await getAdministratorAccess({ user, dbPool:client, env });
+    const entitlementSource = administratorAccess.is_admin ? "administrator" : "commercial";
 
     /*
      * Idempotency:
@@ -90,6 +95,16 @@ export async function recordExport(req, res) {
       });
     }
 
+    if (!user.is_verified) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({error:'EMAIL_NOT_VERIFIED'});
+    }
+    if (!administratorAccess.is_admin && ['MONTHLY_25','PRO_YEAR_UNLIMITED'].includes(user.plan_code) &&
+        (user.subscription_status !== 'active' || !user.renewal_date || !(new Date(user.renewal_date)>new Date()))) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({error:'SUBSCRIPTION_EXPIRED',message:'Renew your subscription before exporting a new statement.'});
+    }
+
     let creditsDeducted = 0;
     let remaining = null;
     let allowanceConsumed = false;
@@ -98,7 +113,11 @@ export async function recordExport(req, res) {
      * FREE
      * One successful first export consumes one of the 15 lifetime uses.
      */
-    if (user.plan_code === "FREE") {
+    if (administratorAccess.is_admin) {
+      // Preserve the underlying plan and all allowances.
+      remaining = null;
+    }
+    else if (user.plan_code === "FREE") {
       const updateResult = await client.query(
         `
         UPDATE users
@@ -200,10 +219,10 @@ export async function recordExport(req, res) {
           job_id,
           file_name,
           plan_code,
-          credits_deducted
+          credits_deducted, entitlement_source
         )
       VALUES
-        ($1, $2, $3, $4, $5)
+        ($1, $2, $3, $4, $5, $6)
       `,
       [
         userId,
@@ -211,6 +230,7 @@ export async function recordExport(req, res) {
         fileName,
         user.plan_code,
         creditsDeducted,
+        entitlementSource,
       ]
     );
 
@@ -225,10 +245,10 @@ export async function recordExport(req, res) {
           action,
           ip_address,
           plan_code,
-          credits_deducted
+          credits_deducted, entitlement_source
         )
       VALUES
-        ($1, $2, $3, $4, $5)
+        ($1, $2, $3, $4, $5, $6)
       `,
       [
         userId,
@@ -236,6 +256,7 @@ export async function recordExport(req, res) {
         ip,
         user.plan_code,
         creditsDeducted,
+        entitlementSource,
       ]
     );
 
@@ -248,6 +269,7 @@ export async function recordExport(req, res) {
       allowance_consumed: allowanceConsumed,
       credits_deducted: creditsDeducted,
       remaining,
+      entitlement_source: entitlementSource,
       plan_code: user.plan_code,
       job_id: jobId,
     });
@@ -267,3 +289,5 @@ export async function recordExport(req, res) {
     client.release();
   }
 }
+}
+export const recordExport = createRecordExport();

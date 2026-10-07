@@ -51,3 +51,7 @@ For support: open Failures, filter the reference/time/code, inspect stage and fi
 The committed frontend vercel.json uses Vite dist and SPA index fallback. Set VITE_API_URL to the existing Railway backend and add the exact HTTPS frontend origin to FRONTEND_ALLOWED_ORIGINS (comma-separated); existing production/Lovable origins remain accepted. Set environment before building. Test /admin and /admin?failure=UUID directly, login/logout and authenticated API CORS. Auth continuity holds within the same frontend origin; a temporary new domain needs a new login. No database/API/payment credentials belong in frontend environment variables.
 
 Only the frontend migration is prepared; hosting/domains are unchanged. Moving the backend separately would require evaluating upload limits, long-running AI tasks, native PDF tooling, pooling and shared provider state. Official SPA guidance: https://vercel.com/docs/frameworks/frontend/vite
+
+## Prepared administrator management (deployment pending)
+
+The approved feature branch extends Admin Users beyond the email directory. Effective authority becomes verified bootstrap-email or database membership, checked by the backend. Users includes grant/revoke confirmation and privilege history; Usage separates no-credit administrator exports from paid Pro exports. The pre-deploy script also applies `src/administration/schema.sql`. This is not live until explicit deployment approval; [Administrator management](ADMINISTRATOR-MANAGEMENT.md) defines security, entitlement and rollout details.

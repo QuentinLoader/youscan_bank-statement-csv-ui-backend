@@ -62,3 +62,7 @@ The encrypted review/audit compatibility layer retains historical proposal struc
 Admin opens separately from scanning. Safe structured failure records and support-resolution history live in Railway Postgres and survive backend restarts. Records begin at the Admin rollout; previous errors are not imported. The default 90-day operational policy is enforced by a protected cleanup endpoint called manually or by an external scheduler, not an automatic TTL. Payment/export/account history is separate.
 
 GitHub holds source, Railway runs the backend and database, and Lovable currently hosts the frontend. Vercel frontend configuration is prepared; hosting has not moved. Admin provider status reads cached availability without a new AI probe.
+
+## Prepared administrator-management release
+
+Production approval is pending. The feature branch adds database-managed verified admins, protected bootstrap/final-admin authority, audited Users grant/revoke actions and an unlimited administrator entitlement that preserves the stored commercial plan. See [security, APIs, migration and acceptance](docs/ADMINISTRATOR-MANAGEMENT.md). Do not merge/deploy this branch or run production migrations until explicitly approved.
