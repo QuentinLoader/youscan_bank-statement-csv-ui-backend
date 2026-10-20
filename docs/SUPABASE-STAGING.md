@@ -15,3 +15,25 @@ Existing verified shared account sign-in, session refresh/local logout, mapped a
 `applyReviewedIdentityMappings` is an operator-only primitive requiring a caller-owned transaction and an independently verified mapping manifest. No HTTP route invokes it. It locks and checks all supplied local accounts before updating only their UUID mappings; callers must roll back on any error. A temporary-table rehearsal against the staging Postgres schema proved preservation and reversal for four synthetic accounts and six account/history tables. It does not prove a Supabase password-hash import or a database-backup restore.
 
 The protected Vercel frontend, Railway test database and fixtures are isolated. OpenAI execution, payments and app email delivery stay disabled in this rehearsal. No shared identity password or existing customer data is changed by configuring this mode.
+
+## Prepared hash-import rehearsal
+
+`scripts/rehearse-supabase-import.js` defaults to preparation only. Its explicit
+`--execute` mode requires the fixed cluster URL, a server-only SUPABASE_ADMIN_KEY
+and an unused YOUSCAN_IMPORT_TEST_EMAIL matching the dedicated Gmail import-test
+alias pattern. Never put an admin key in a frontend, source control or chat.
+Prefer a one-time authorised operator process rather than persisting the shared
+cluster's administrator credential on the staging web service.
+
+The harness generates a random password in memory, creates one ordinary verified
+synthetic identity through the supported Admin API using a bcrypt cost-10 hash,
+verifies that password and rejects a random wrong password, signs out the test
+session, then removes only the UUID returned by this invocation's create call.
+It never updates an existing identity; a create conflict stops without deleting
+an email match. Passwords/hashes/tokens are not logged. A failed cleanup must be
+resolved before accepting the rehearsal. Local tests cover the hash exchange and
+duplicate-create boundary; they are not evidence of a live provider import.
+
+The current connected tools expose SQL/management and public keys, not an Auth
+Admin connection. Live execution remains pending secure operator access. Do not
+work around that by hand-writing the shared auth.users/auth.identities tables.
