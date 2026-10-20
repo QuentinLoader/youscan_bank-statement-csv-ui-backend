@@ -23,5 +23,13 @@ test('shared-auth mode closes legacy sign-in, registration and reset routes and 
     const token = jwt.sign({ userId: 42 }, process.env.JWT_SECRET);
     const response = await fetch(`${url}/me`, { headers: { Authorization: `Bearer ${token}` } });
     assert.equal(response.status, 401);
-  } finally { server.close(); await once(server, 'close'); }
+    const disabledEnrolment = await fetch(`${url}/enrol`, { method: 'POST' });
+    assert.equal(disabledEnrolment.status, 409);
+    assert.equal((await disabledEnrolment.json()).code, 'ENROLMENT_DISABLED');
+    process.env.SHARED_ENROLMENT_ENABLED = 'true';
+    const missingIdentity = await fetch(`${url}/enrol`, { method: 'POST' });
+    assert.equal(missingIdentity.status, 401);
+    const forgedIdentity = await fetch(`${url}/enrol`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+    assert.equal(forgedIdentity.status, 401);
+  } finally { delete process.env.SHARED_ENROLMENT_ENABLED; server.close(); await once(server, 'close'); }
 });

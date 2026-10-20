@@ -10,7 +10,7 @@ const normalizeEmail = value => String(value || '').trim().toLowerCase();
 
 // The shared Auth service verifies the signature and current identity. Unverified
 // JWT claims below are used only for early rejection, never to grant app access.
-export function createSupabaseAuthenticator({ env = process.env, fetchImpl = fetch, dbPool, now = Date.now } = {}) {
+export function createSupabaseIdentityVerifier({ env = process.env, fetchImpl = fetch, now = Date.now } = {}) {
   return async token => {
     const url = String(env.SUPABASE_URL || '').replace(/\/+$/, '');
     const key = env.SUPABASE_PUBLISHABLE_KEY;
@@ -46,8 +46,16 @@ export function createSupabaseAuthenticator({ env = process.env, fetchImpl = fet
       throw new IdentityError(403, 'MFA_REQUIRED', 'Complete two-factor sign-in before accessing YouScan.');
     }
 
+    return { id: identity.id, email: normalizeEmail(identity.email) };
+  };
+}
+
+export function createSupabaseAuthenticator(options = {}) {
+  const verify = createSupabaseIdentityVerifier(options);
+  return async token => {
+    const identity = await verify(token);
     let result;
-    try { result = await dbPool.query('SELECT id, email, is_verified FROM users WHERE supabase_user_id=$1 LIMIT 1', [identity.id]); }
+    try { result = await options.dbPool.query('SELECT id, email, is_verified FROM users WHERE supabase_user_id=$1 LIMIT 1', [identity.id]); }
     catch { throw unavailable(); }
     const user = result.rows[0];
     if (!user || normalizeEmail(user.email) !== normalizeEmail(identity.email)) {
