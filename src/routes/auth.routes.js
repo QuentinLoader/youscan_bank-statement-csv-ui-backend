@@ -10,6 +10,16 @@ import { AccountServiceError, changePasswordForUser, resendVerificationForUser }
 
 const router = express.Router();
 
+// Never keep a second password/reset authority alive when shared sign-in is on.
+// This initial rehearsal exposes profile reads only; account migration and
+// shared credential-management flows have their own release acceptance.
+router.use((req, res, next) => {
+  if (process.env.AUTH_PROVIDER && process.env.AUTH_PROVIDER !== 'legacy' && !(req.method === 'GET' && req.path === '/me')) {
+    return res.status(409).json({ code: 'SHARED_AUTH_MANAGED', message: 'Account changes are unavailable in this sign-in preview.' });
+  }
+  return next();
+});
+
 /* ============================
    REGISTER
 ============================ */
