@@ -5,9 +5,11 @@ import { pathToFileURL } from 'node:url';
 // Operator-only, never invoked by an HTTP route. Creates one synthetic identity
 // through the supported Auth Admin API; never changes an existing identity.
 export async function rehearseHashImport({ url, adminKey, email, fetchImpl = fetch }) {
-  if (url !== 'https://nysyurwlggaklhskmzma.supabase.co' ||
-      !/^loaderquentin\+youscan-import-[a-z0-9-]+@gmail\.com$/.test(email || '') ||
-      !adminKey || adminKey.startsWith('sb_publishable_')) throw new Error('Invalid rehearsal configuration');
+  if (url !== 'https://nysyurwlggaklhskmzma.supabase.co') throw new Error('Rehearsal stopped: target is not the approved Authentication Cluster');
+  if (!/^loaderquentin\+youscan-import-[a-z0-9-]+@gmail\.com$/.test(email || '')) throw new Error('Rehearsal stopped: synthetic email format is invalid');
+  adminKey = String(adminKey || '').trim();
+  if (!adminKey) throw new Error('Rehearsal stopped: administrator key was empty');
+  if (adminKey.startsWith('sb_publishable_')) throw new Error('Rehearsal stopped: publishable key supplied; use the existing secret or service_role key at the hidden prompt');
   const password = crypto.randomBytes(32).toString('base64url');
   const hash = await bcrypt.hash(password, 10);
   let createdId;

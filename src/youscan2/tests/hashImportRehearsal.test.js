@@ -4,6 +4,24 @@ import bcrypt from 'bcrypt';
 import { rehearseHashImport } from '../../../scripts/rehearse-supabase-import.js';
 const id = '11111111-1111-4111-8111-111111111111';
 const config = { url: 'https://nysyurwlggaklhskmzma.supabase.co', adminKey: 'synthetic-server-only-key', email: 'loaderquentin+youscan-import-synthetic@gmail.com' };
+
+test('invalid target, email or public key stops before any identity request without exposing supplied values', async () => {
+  let calls = 0;
+  const fetchImpl = async () => { calls++; throw new Error('No network request is allowed'); };
+  for (const [override, message] of [
+    [{ url: 'https://unapproved.example.invalid' }, /target is not the approved/],
+    [{ email: 'existing-owner@example.invalid' }, /synthetic email format/],
+    [{ adminKey: ' ' }, /administrator key was empty/],
+    [{ adminKey: ' sb_publishable_synthetic-do-not-disclose ' }, /publishable key supplied/],
+  ]) {
+    await assert.rejects(rehearseHashImport({ ...config, ...override, fetchImpl }), error => {
+      assert.match(error.message, message);
+      assert.ok(!error.message.includes('synthetic-do-not-disclose'));
+      return true;
+    });
+  }
+  assert.equal(calls, 0);
+});
 test('synthetic hash import uses the supported create API, verifies bcrypt and removes only its created identity', async () => {
   const calls = []; let hash; let attempts = 0;
   const result = await rehearseHashImport({ ...config, fetchImpl: async (url, options) => {
