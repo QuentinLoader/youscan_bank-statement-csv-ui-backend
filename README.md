@@ -4,6 +4,8 @@ This repository contains the current AI-only bank-statement service. `main` is t
 
 The configured production provider is OpenAI. Historical Anthropic references do not define the current provider. Credentials and the selected model are configured in Railway, never in Git.
 
+Production and staging share the implementation on `main`; deployment variables select each environment's database, providers and authentication mode. `AUTH_PROVIDER=legacy` (or omitted) retains existing YouScan sign-in. `AUTH_PROVIDER=supabase` enables the Addvision Authentication Cluster integration, with explicit reviewed local-account mappings; new-user enrolment is separately gated. Merging shared-auth support does not run an identity migration or enable shared sign-in. The production AI timeout remains the owner-approved `YOUSCAN_V2_AI_TIMEOUT_MS=180000`. See [shared-auth configuration and operator rehearsal](docs/SUPABASE-STAGING.md).
+
 ## Customer workflow
 
 Authenticated availability check → upload → AI PDF page reading → AI structured extraction → evidence/schema/arithmetic validation → result or actionable review → CSV export.

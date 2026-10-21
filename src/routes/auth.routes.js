@@ -7,8 +7,40 @@ import { authenticateUser } from "../middleware/auth.middleware.js";
 import { sendVerificationEmail, sendPasswordResetEmail } from "../utils/email.js";
 import { getAdministratorAccess } from "../administration/access.js";
 import { AccountServiceError, changePasswordForUser, resendVerificationForUser } from "../services/account.service.js";
+import { createSupabaseIdentityVerifier, IdentityError } from '../services/supabaseIdentity.service.js';
+import { enrolVerifiedIdentity } from '../services/sharedEnrolment.service.js';
 
 const router = express.Router();
+
+router.post('/enrol', async (req, res) => {
+  if (process.env.AUTH_PROVIDER !== 'supabase' || process.env.SHARED_ENROLMENT_ENABLED !== 'true') {
+    return res.status(409).json({ code: 'ENROLMENT_DISABLED', message: 'New account enrolment is unavailable in this preview.' });
+  }
+  try {
+    const match = /^Bearer ([^\s]+)$/i.exec(req.headers.authorization || '');
+    if (!match) return res.status(401).json({ message: 'Sign in before joining YouScan.' });
+    const identity = await createSupabaseIdentityVerifier()(match[1]);
+    const allowed = String(process.env.SHARED_ENROLMENT_ALLOWED_EMAILS || '').split(',').map(email => email.trim().toLowerCase()).filter(Boolean);
+    if (allowed.length && !allowed.includes(identity.email)) {
+      return res.status(403).json({ code: 'ENROLMENT_RESTRICTED', message: 'This preview is limited to approved test accounts.' });
+    }
+    const result = await enrolVerifiedIdentity(pool, identity);
+    return res.status(result.created ? 201 : 200).json(result);
+  } catch (error) {
+    if (error instanceof IdentityError) return res.status(error.status).json({ code: error.code, message: error.message });
+    return res.status(503).json({ code: 'ENROLMENT_UNAVAILABLE', message: 'Account enrolment is temporarily unavailable.' });
+  }
+});
+
+// Never keep a second password/reset authority alive when shared sign-in is on.
+// This initial rehearsal exposes profile reads only; account migration and
+// shared credential-management flows have their own release acceptance.
+router.use((req, res, next) => {
+  if (process.env.AUTH_PROVIDER && process.env.AUTH_PROVIDER !== 'legacy' && !(req.method === 'GET' && req.path === '/me')) {
+    return res.status(409).json({ code: 'SHARED_AUTH_MANAGED', message: 'Account changes are unavailable in this sign-in preview.' });
+  }
+  return next();
+});
 
 /* ============================
    REGISTER
