@@ -34,11 +34,7 @@ app.use(
         ...String(process.env.FRONTEND_ALLOWED_ORIGINS || "").split(",").map(value => value.trim()).filter(value => /^https:\/\/[^/]+$/.test(value))
       ];
       
-      if (
-        allowedOrigins.includes(origin) || 
-        origin.endsWith(".lovable.app") || 
-        origin.endsWith(".lovableproject.com")
-      ) {
+      if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
       return callback(null, false);
