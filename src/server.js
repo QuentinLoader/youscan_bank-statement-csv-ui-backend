@@ -31,6 +31,8 @@ app.use(
       const allowedOrigins = [
         "https://youscan.addvision.co.za",
         "http://localhost:3000", // Added for local testing
+        "http://localhost:8080",
+        "http://localhost:5173",
         ...String(process.env.FRONTEND_ALLOWED_ORIGINS || "").split(",").map(value => value.trim()).filter(value => /^https:\/\/[^/]+$/.test(value))
       ];
       
