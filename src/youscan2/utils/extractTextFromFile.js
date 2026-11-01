@@ -258,6 +258,39 @@ export function hasUsefulPdfText(
   );
 }
 
+const DATED_TX_LINE_RE =
+  /^(?:\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*|\d{4}[-/]\d{2}[-/]\d{2}|\d{2}[-/]\d{2}[-/]\d{4})\b(.*)$/i;
+
+export function hasCompleteNativeTransactionText(value) {
+  const text = normalizeText(value);
+  if (!hasUsefulPdfText(text)) {
+    return false;
+  }
+
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  let datedLines = 0;
+
+  for (const line of lines) {
+    const match = line.match(DATED_TX_LINE_RE);
+    if (!match) continue;
+    const remainder = match[1] || "";
+    // Check if this line carries monetary values
+    if (!/\d+\.\d{2}/.test(remainder)) continue;
+    datedLines += 1;
+    // Strip trailing Cr/Dr markers and numbers to verify a real text description exists
+    const withoutAmounts = remainder
+      .replace(/\b(?:Cr|Dr|CR|DR)\b/g, " ")
+      .replace(/[-+]?\s*R?\s*[\d,]+\.\d{2}/g, " ")
+      .replace(/\b\d+\b/g, " ")
+      .trim();
+    if (!/[A-Za-z]{3,}/.test(withoutAmounts)) {
+      return false;
+    }
+  }
+
+  return datedLines > 0;
+}
+
 function getResponseOutputText(
   response
 ) {
@@ -1028,7 +1061,11 @@ export async function extractTextFromFile(
 
     /*
      * Native reading remains available to offline tooling. Customer PDFs must
-     * be read visually: useful text length cannot detect missing image cells.
+     * be read visually by default: useful text length alone cannot detect
+     * missing image cells. When YOUSCAN_V2_NATIVE_FAST_PATH_ENABLED is enabled
+     * and every dated transaction row has non-empty alphabetic descriptions,
+     * try native text first and expose recoverWithVision() for automatic
+     * Vision fallback if downstream AI validation is not 100% completed.
      */
     if (
       !requireAi &&
@@ -1061,101 +1098,136 @@ export async function extractTextFromFile(
       };
     }
 
-    /*
-     * Production reads all PDF pages with AI; offline tools recover scans.
-     */
-    const recovery =
-      await recoverPdfTextWithVision({
-        buffer:
-          file.buffer,
+    const runVisionExtraction = async () => {
+      const recovery =
+        await recoverPdfTextWithVision({
+          buffer:
+            file.buffer,
 
-        fileName,
-        env,
-        fetchImpl,
-        requireAi,
-      });
+          fileName,
+          env,
+          fetchImpl,
+          requireAi,
+        });
+
+      if (
+        recovery?.text
+      ) {
+        console.log(
+          "V2 PDF vision fallback used",
+          {
+            pages:
+              result.numpages ||
+              null,
+
+            nativeTextLength:
+              nativeText.length,
+
+            recoveredTextLength:
+              recovery.text.length,
+
+            durationMs:
+              recovery.durationMs,
+
+            model:
+              recovery.model,
+
+            preferredModel:
+              recovery.preferredModel,
+
+            usedPrimaryFallback:
+              recovery.usedPrimaryFallback,
+
+            rateLimitRetries:
+              recovery.rateLimitRetries,
+          }
+        );
+
+        return {
+          text:
+            recovery.text,
+
+          meta: {
+            sourceType:
+              "pdf",
+
+            pages:
+              result.numpages ||
+              null,
+
+            info:
+              result.info ||
+              null,
+
+            textSource:
+              "openai_pdf_vision",
+
+            visionFallbackUsed:
+              true,
+
+            nativeTextLength:
+              nativeText.length,
+
+            visionDurationMs:
+              recovery.durationMs,
+
+            visionModel:
+              recovery.model,
+
+            preferredVisionModel:
+              recovery.preferredModel,
+
+            visionPrimaryFallbackUsed:
+              recovery.usedPrimaryFallback,
+
+            visionRateLimitRetries:
+              recovery.rateLimitRetries,
+          },
+        };
+      }
+
+      if (requireAi) {
+        const error = new Error(AI_EXTRACTION_FAILED_MESSAGE);
+        error.code = "V2_AI_INVALID_RESPONSE";
+        error.status = 422;
+        throw error;
+      }
+
+      return null;
+    };
 
     if (
-      recovery?.text
+      requireAi &&
+      enabled(env.YOUSCAN_V2_NATIVE_FAST_PATH_ENABLED) &&
+      hasCompleteNativeTransactionText(nativeText)
     ) {
-      console.log(
-        "V2 PDF vision fallback used",
-        {
-          pages:
-            result.numpages ||
-            null,
-
-          nativeTextLength:
-            nativeText.length,
-
-          recoveredTextLength:
-            recovery.text.length,
-
-          durationMs:
-            recovery.durationMs,
-
-          model:
-            recovery.model,
-
-          preferredModel:
-            recovery.preferredModel,
-
-          usedPrimaryFallback:
-            recovery.usedPrimaryFallback,
-
-          rateLimitRetries:
-            recovery.rateLimitRetries,
-        }
-      );
+      const apiKey = String(
+        env.YOUSCAN_V2_OPENAI_API_KEY || env.OPENAI_API_KEY || ""
+      ).trim();
+      if (!apiKey || typeof fetchImpl !== "function") {
+        throw createVisionServiceError("V2_AI_CONFIG_INVALID");
+      }
 
       return {
-        text:
-          recovery.text,
-
+        text: nativeText,
         meta: {
-          sourceType:
-            "pdf",
-
-          pages:
-            result.numpages ||
-            null,
-
-          info:
-            result.info ||
-            null,
-
-          textSource:
-            "openai_pdf_vision",
-
-          visionFallbackUsed:
-            true,
-
-          nativeTextLength:
-            nativeText.length,
-
-          visionDurationMs:
-            recovery.durationMs,
-
-          visionModel:
-            recovery.model,
-
-          preferredVisionModel:
-            recovery.preferredModel,
-
-          visionPrimaryFallbackUsed:
-            recovery.usedPrimaryFallback,
-
-          visionRateLimitRetries:
-            recovery.rateLimitRetries,
+          sourceType: "pdf",
+          pages: result.numpages || null,
+          info: result.info || null,
+          textSource: "native_fast_path",
+          visionFallbackUsed: false,
+          nativeTextLength: nativeText.length,
         },
+        recoverWithVision: runVisionExtraction,
       };
     }
 
-    if (requireAi) {
-      const error = new Error(AI_EXTRACTION_FAILED_MESSAGE);
-      error.code = "V2_AI_INVALID_RESPONSE";
-      error.status = 422;
-      throw error;
+    /*
+     * Production reads all PDF pages with AI; offline tools recover scans.
+     */
+    const visionResult = await runVisionExtraction();
+    if (visionResult) {
+      return visionResult;
     }
 
     /*

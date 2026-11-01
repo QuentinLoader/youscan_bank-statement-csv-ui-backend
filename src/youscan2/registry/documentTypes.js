@@ -19,6 +19,12 @@ export const DOCUMENT_SUBTYPES = {
   CAPITEC_STATEMENT: "capitec_statement",
   DISCOVERY_STATEMENT: "discovery_statement",
   STANDARD_BANK_STATEMENT: "standard_bank_statement",
+  INVESTEC_STATEMENT: "investec_statement",
+  TYMEBANK_STATEMENT: "tymebank_statement",
+  AFRICAN_BANK_STATEMENT: "african_bank_statement",
+  SASFIN_STATEMENT: "sasfin_statement",
+  BANK_ZERO_STATEMENT: "bank_zero_statement",
+  BIDVEST_BANK_STATEMENT: "bidvest_bank_statement",
 
   GENERIC_INVOICE: "generic_invoice",
   GENERIC_DELIVERY_NOTE: "generic_delivery_note",

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * YouScan V2
  * Bank statement validator.
  */
@@ -32,6 +32,36 @@ function isValidTransactionDate(value) {
     date.getUTCMonth() === month - 1 &&
     date.getUTCDate() === day
   );
+}
+
+function parseDateTimestamp(value) {
+  const match = String(value || "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) return null;
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3]);
+  return Date.UTC(year, month - 1, day);
+}
+
+function isReverseChronologicalStatement(transactions) {
+  if (!Array.isArray(transactions) || transactions.length < 2) return false;
+  const timestamps = transactions.map((tx) => parseDateTimestamp(tx?.date));
+  if (timestamps.some((ts) => ts === null)) return false;
+  if (timestamps[0] <= timestamps[timestamps.length - 1]) return false;
+  for (let i = 1; i < timestamps.length; i++) {
+    if (timestamps[i] > timestamps[i - 1]) return false;
+  }
+  let reverseMatches = 0;
+  let forwardMatches = 0;
+  for (let i = 1; i < transactions.length; i++) {
+    const prev = transactions[i - 1];
+    const curr = transactions[i];
+    if (isNumber(prev?.balance) && isNumber(curr?.balance) && isNumber(prev?.amount) && prev.amount !== 0) {
+      if (round2(prev.balance - prev.amount) === round2(curr.balance)) reverseMatches++;
+      if (isNumber(curr?.amount) && round2(prev.balance + curr.amount) === round2(curr.balance)) forwardMatches++;
+    }
+  }
+  return reverseMatches > forwardMatches;
 }
 
 function looksLikeDebit(description = "") {
@@ -196,6 +226,8 @@ export async function validateBankStatement(normalized) {
     warningCount++;
   }
 
+  const reverseOrder = isReverseChronologicalStatement(transactions);
+
   for (let i = 0; i < transactions.length; i++) {
     const tx = transactions[i];
     const description = tx?.description || "";
@@ -281,7 +313,15 @@ export async function validateBankStatement(normalized) {
     let amountConfirmedByBalance = false;
 
     if (isNumber(balance)) {
-      if (i > 0 && isNumber(transactions[i - 1]?.balance)) {
+      if (reverseOrder) {
+        if (i < transactions.length - 1 && isNumber(transactions[i + 1]?.balance)) {
+          amountConfirmedByBalance =
+            round2(balance - transactions[i + 1].balance) === round2(amount);
+        } else if (i === transactions.length - 1 && isNumber(openingBalance)) {
+          amountConfirmedByBalance =
+            round2(balance - openingBalance) === round2(amount);
+        }
+      } else if (i > 0 && isNumber(transactions[i - 1]?.balance)) {
         amountConfirmedByBalance =
           round2(balance - transactions[i - 1].balance) === round2(amount);
       } else if (i === 0 && isNumber(openingBalance)) {
@@ -322,8 +362,11 @@ export async function validateBankStatement(normalized) {
     if (i > 0) {
       const previous = transactions[i - 1];
       if (isNumber(previous?.balance) && isNumber(balance) && isNumber(amount)) {
+        const expectedDelta = reverseOrder && isNumber(previous?.amount)
+          ? round2(-previous.amount)
+          : round2(amount);
         const delta = round2(balance - previous.balance);
-        if (delta !== round2(amount)) {
+        if (delta !== expectedDelta) {
           addIssue(issues, {
             severity: "warning",
             issueType: "balance_continuity_mismatch",
@@ -344,7 +387,8 @@ export async function validateBankStatement(normalized) {
   }
 
   if (isNumber(openingBalance) && transactions.length > 0) {
-    const firstTx = transactions[0];
+    const firstChronologicalIndex = reverseOrder ? transactions.length - 1 : 0;
+    const firstTx = transactions[firstChronologicalIndex];
     if (isNumber(firstTx.amount) && isNumber(firstTx.balance)) {
       const expectedFirstBalance = round2(openingBalance + firstTx.amount);
       const actualFirstBalance = round2(firstTx.balance);
@@ -354,7 +398,7 @@ export async function validateBankStatement(normalized) {
           severity: "warning",
           issueType: "opening_balance_mismatch",
           message: "Opening balance does not reconcile with the first transaction.",
-          rowIndex: 0,
+          rowIndex: firstChronologicalIndex,
           metadata: {
             openingBalance,
             firstTransaction: firstTx,
@@ -368,7 +412,8 @@ export async function validateBankStatement(normalized) {
   }
 
   if (isNumber(closingBalance) && transactions.length > 0) {
-    const lastTx = transactions[transactions.length - 1];
+    const lastChronologicalIndex = reverseOrder ? 0 : transactions.length - 1;
+    const lastTx = transactions[lastChronologicalIndex];
     if (isNumber(lastTx.balance)) {
       const actualClosingBalance = round2(lastTx.balance);
       const expectedClosingBalance = round2(closingBalance);
@@ -378,7 +423,7 @@ export async function validateBankStatement(normalized) {
           severity: "warning",
           issueType: "closing_balance_mismatch",
           message: "Closing balance does not match the final transaction balance.",
-          rowIndex: transactions.length - 1,
+          rowIndex: lastChronologicalIndex,
           metadata: {
             closingBalance,
             lastTransaction: lastTx,

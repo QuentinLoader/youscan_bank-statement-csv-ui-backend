@@ -90,3 +90,22 @@ test("Batch 17 successful V2 consumption is atomic and logs parse_statement_v2",
   assert.equal(db.calls.some((call) => call.sql.startsWith("INSERT INTO usage_logs") && call.params[1] === "parse_statement_v2"), true);
   assert.equal(db.calls.some((call) => call.sql === "COMMIT"), true);
 });
+
+test("PRO_YEAR_UNLIMITED users retain unlimited parses without credit deduction even when credits_remaining is null or 0", async () => {
+  const now = new Date("2026-08-20T00:00:00.000Z");
+  for (const creditsRemaining of [null, 0]) {
+    const db = fakeDb({
+      id: 42,
+      plan_code: "PRO_YEAR_UNLIMITED",
+      credits_remaining: creditsRemaining,
+      lifetime_parses_used: 999,
+      subscription_status: "active",
+      renewal_date: "2027-08-20T00:00:00.000Z",
+    });
+    const result = await consumeSuccessfulV2Parse({ userId: 42, ipAddress: "127.0.0.1", dbPool: db.pool, now });
+    assert.equal(result.planCode, "PRO_YEAR_UNLIMITED");
+    assert.equal(result.creditsDeducted, 0);
+    assert.equal(result.remaining, null);
+    assert.equal(db.calls.some((call) => call.sql.startsWith("UPDATE users")), false);
+  }
+});

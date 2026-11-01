@@ -68,7 +68,16 @@ async function applyPlanOrCredits(client, userId, planCode) {
   if (planCode === "PAYG_10") {
     await client.query(
       `UPDATE users
-       SET plan_code = $2, credits_remaining = COALESCE(credits_remaining, 0) + 10
+       SET plan_code = CASE
+             WHEN plan_code = 'PRO_YEAR_UNLIMITED' AND subscription_status = 'active' AND renewal_date > NOW()
+             THEN 'PRO_YEAR_UNLIMITED'
+             ELSE $2
+           END,
+           credits_remaining = CASE
+             WHEN plan_code = 'PRO_YEAR_UNLIMITED' AND subscription_status = 'active' AND renewal_date > NOW()
+             THEN NULL
+             ELSE COALESCE(credits_remaining, 0) + 10
+           END
        WHERE id = $1`,
       [Number(userId), planCode]
     );

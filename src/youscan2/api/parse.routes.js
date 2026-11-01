@@ -236,25 +236,110 @@ export function createV2ParseRouter({
           });
         }
 
+        /*
+         * Ensure PRO_YEAR_UNLIMITED and administrator accounts always retain
+         * unlimited parses, while finite-allowance plans cannot submit a single
+         * batch larger than their remaining export allowance.
+         */
+        const userRecord = req.userRecord;
+        if (
+          userRecord &&
+          !userRecord.is_admin &&
+          !userRecord.admin_unlimited &&
+          userRecord.plan_code !== "PRO_YEAR_UNLIMITED"
+        ) {
+          let remainingAllowance = Infinity;
+          if (
+            userRecord.plan_code === "FREE" &&
+            userRecord.lifetime_parses_used !== undefined &&
+            userRecord.lifetime_parses_used !== null
+          ) {
+            remainingAllowance = Math.max(0, 15 - Number(userRecord.lifetime_parses_used));
+          } else if (
+            (userRecord.plan_code === "PAYG_10" || userRecord.plan_code === "MONTHLY_25") &&
+            userRecord.credits_remaining !== undefined &&
+            userRecord.credits_remaining !== null
+          ) {
+            remainingAllowance = Math.max(0, Number(userRecord.credits_remaining));
+          }
+
+          if (files.length > remainingAllowance) {
+            const code = userRecord.plan_code === "FREE" ? "FREE_LIMIT_REACHED" : "CREDITS_EXHAUSTED";
+            await telemetry.finish(req.processingAttempt, { outcome: "rejected", error: { code, status: 403 } });
+            return res.status(403).json({
+              code,
+              error: code,
+              upgrade_required: true,
+              message: `You have ${remainingAllowance} export${remainingAllowance === 1 ? "" : "s"} remaining, which is fewer than the ${files.length} statements in this batch.`,
+            });
+          }
+        }
+
         const internalResults = [];
 
         for (const [index, file] of files.entries()) {
           if (index) req.processingAttempt = await telemetry.start("availability");
           await availability.assertAvailable();
           await telemetry.stage(req.processingAttempt, "pdf_reading");
-          const extraction = await extractText(file, { requireAi: true });
+          let extraction = await extractText(file, { requireAi: true });
 
-          const parseResult = await runJob({
-            file: {
-              originalname: file.originalname,
-              mimetype: file.mimetype,
-            },
-            extractedText: extraction.text,
-            extractionMeta: extraction.meta,
-            requireAi: true,
-            availability,
-            onStage: stage => telemetry.stage(req.processingAttempt, stage),
-          });
+          let parseResult;
+          try {
+            parseResult = await runJob({
+              file: {
+                originalname: file.originalname,
+                mimetype: file.mimetype,
+              },
+              extractedText: extraction.text,
+              extractionMeta: extraction.meta,
+              requireAi: true,
+              availability,
+              onStage: stage => telemetry.stage(req.processingAttempt, stage),
+            });
+
+            if (
+              parseResult?.status !== "completed" &&
+              typeof extraction.recoverWithVision === "function"
+            ) {
+              const visionExtraction = await extraction.recoverWithVision();
+              if (visionExtraction?.text) {
+                extraction = visionExtraction;
+                parseResult = await runJob({
+                  file: {
+                    originalname: file.originalname,
+                    mimetype: file.mimetype,
+                  },
+                  extractedText: extraction.text,
+                  extractionMeta: extraction.meta,
+                  requireAi: true,
+                  availability,
+                  onStage: stage => telemetry.stage(req.processingAttempt, stage),
+                });
+              }
+            }
+          } catch (jobError) {
+            if (typeof extraction.recoverWithVision === "function") {
+              const visionExtraction = await extraction.recoverWithVision();
+              if (visionExtraction?.text) {
+                extraction = visionExtraction;
+                parseResult = await runJob({
+                  file: {
+                    originalname: file.originalname,
+                    mimetype: file.mimetype,
+                  },
+                  extractedText: extraction.text,
+                  extractionMeta: extraction.meta,
+                  requireAi: true,
+                  availability,
+                  onStage: stage => telemetry.stage(req.processingAttempt, stage),
+                });
+              } else {
+                throw jobError;
+              }
+            } else {
+              throw jobError;
+            }
+          }
 
           try { ensureUsableParse(parseResult); } catch (error) {
             await telemetry.finish(req.processingAttempt, { error, diagnostic: parseResult.diagnostic, jobId: parseResult.jobId });

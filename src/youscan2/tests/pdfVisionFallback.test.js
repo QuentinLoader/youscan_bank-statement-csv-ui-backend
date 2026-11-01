@@ -18,6 +18,7 @@ test("production PDF vision auth and connection failures propagate to the availa
 
 import {
   extractTextFromFile,
+  hasCompleteNativeTransactionText,
   hasUsefulPdfText,
 } from "../utils/extractTextFromFile.js";
 
@@ -86,6 +87,34 @@ test("production fails closed without PDF reading credentials even when native t
   await assert.rejects(() => extractTextFromFile(pdfFile(), {
     requireAi: true, pdfParseImpl: async () => ({ text: recoveredFnbText, numpages: 1 }), env: {},
   }), error => error.code === "V2_AI_CONFIG_INVALID");
+});
+
+test("opt-in native fast path returns complete native text with on-demand Vision recovery and rejects image-cell PDFs", async () => {
+  const partialText = recoveredFnbText.replace("FNB App Transfer To Prosper Payment", "");
+  assert.equal(hasCompleteNativeTransactionText(partialText), false);
+  assert.equal(hasCompleteNativeTransactionText(recoveredFnbText), true);
+
+  let visionCalls = 0;
+  const fastResult = await extractTextFromFile(pdfFile(), {
+    requireAi: true,
+    pdfParseImpl: async () => ({ text: recoveredFnbText, numpages: 1 }),
+    env: {
+      OPENAI_API_KEY: "synthetic-key",
+      YOUSCAN_V2_AI_MODEL: "synthetic",
+      YOUSCAN_V2_NATIVE_FAST_PATH_ENABLED: "true",
+    },
+    fetchImpl: async () => {
+      visionCalls += 1;
+      return completedOpenAiResponse(recoveredFnbText);
+    },
+  });
+  assert.equal(visionCalls, 0);
+  assert.equal(fastResult.meta.textSource, "native_fast_path");
+  assert.equal(typeof fastResult.recoverWithVision, "function");
+
+  const recovered = await fastResult.recoverWithVision();
+  assert.equal(visionCalls, 1);
+  assert.equal(recovered.meta.textSource, "openai_pdf_vision");
 });
 
 function completedOpenAiResponse(text) {

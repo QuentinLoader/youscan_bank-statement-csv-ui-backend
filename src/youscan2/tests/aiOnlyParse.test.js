@@ -4,6 +4,7 @@ import { runParseJob } from "../orchestrator/runParseJob.js";
 import { createAnalysisAvailability } from "../ai/availability.js";
 import { getAiConfig } from "../ai/config.js";
 import { projectAiBankStatementCandidate } from "../ai/extraction/projectCandidate.js";
+import { expandCompactBankStatementCandidate } from "../ai/extraction/bankStatementContract.js";
 import { AI_BANK_STATEMENT_SOURCE_TEXT, makeValidAiBankStatementCandidate } from "./fixtures/aiBankStatementExtraction.fixture.js";
 import { makeShadowAiEnvelope } from "./fixtures/aiBankStatementShadow.fixture.js";
 
@@ -252,4 +253,56 @@ test('rounding a row total cannot hide suspicious precision in the AI payment or
   assert.equal(result.status, 'needs_review');
   assert.ok(result.result.issues.some(issue => issue.issueType === 'source_amount_precision_issue'));
   assert.equal(result.result.data.transactions[0].fee, -6.001);
+});
+
+for (const [bank, expectedSubtype] of [
+  ["Investec", "investec_statement"],
+  ["Investec Bank Limited", "investec_statement"],
+  ["TymeBank", "tymebank_statement"],
+  ["Tyme Bank Limited", "tymebank_statement"],
+  ["African Bank", "african_bank_statement"],
+  ["Sasfin Bank", "sasfin_statement"],
+  ["Bank Zero", "bank_zero_statement"],
+  ["Bidvest Bank", "bidvest_bank_statement"],
+]) {
+  test(`${bank}: recognises expanded South African bank and preserves AI data`, async () => {
+    const candidate = makeValidAiBankStatementCandidate();
+    candidate.bankName.value = bank;
+    candidate.bankName.evidence = [`${bank} BANK STATEMENT`];
+    const text = AI_BANK_STATEMENT_SOURCE_TEXT.replace("FNB BANK STATEMENT", `${bank} BANK STATEMENT`);
+    const result = await parse(candidate, text);
+    assert.equal(result.status, "completed");
+    assert.equal(result.classification.documentSubtype, expectedSubtype);
+    assert.equal(result.authoritativeSource, "ai");
+  });
+}
+
+test("reverse-chronological statements validate cleanly without false balance continuity warnings", async () => {
+  const candidate = makeValidAiBankStatementCandidate();
+  candidate.transactions = [
+    ...candidate.transactions,
+  ].reverse();
+  const result = await parse(candidate, AI_BANK_STATEMENT_SOURCE_TEXT);
+  assert.equal(result.status, "completed");
+  assert.equal(result.result.issues.length, 0);
+});
+
+test("compact row-level schema expands losslessly into canonical field objects", async () => {
+  const full = makeValidAiBankStatementCandidate();
+  const compact = {
+    ...full,
+    transactions: full.transactions.map((row) => ({
+      date: row.date.value,
+      description: row.description.value,
+      amount: row.amount.value,
+      fee: row.fee.value,
+      balance: row.balance.value,
+      confidence: 0.99,
+      evidence: row.description.evidence,
+    })),
+  };
+  const expanded = expandCompactBankStatementCandidate(compact);
+  const result = await parse(expanded, AI_BANK_STATEMENT_SOURCE_TEXT);
+  assert.equal(result.status, "completed");
+  assert.deepEqual(result.result.data, projectAiBankStatementCandidate(full, { sourceFileName: "wrong-bank-absa.pdf" }));
 });

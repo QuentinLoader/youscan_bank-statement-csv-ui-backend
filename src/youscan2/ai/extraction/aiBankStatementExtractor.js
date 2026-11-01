@@ -11,7 +11,9 @@ import { AI_TASKS } from "../contracts.js";
 import { AI_ERROR_CODES, AiError } from "../errors.js";
 import { runAiTask } from "../runAiTask.js";
 import {
+  AI_BANK_STATEMENT_COMPACT_RESPONSE_SCHEMA,
   AI_BANK_STATEMENT_EXTRACTION_RESPONSE_SCHEMA,
+  expandCompactBankStatementCandidate,
   validateAiBankStatementExtractionData,
 } from "./bankStatementContract.js";
 
@@ -67,16 +69,25 @@ export async function aiBankStatementExtractor({
     );
   }
 
-  return runAiTask({
+  const useCompactSchema = String(process.env.YOUSCAN_V2_COMPACT_SCHEMA_ENABLED || "").toLowerCase() === "true";
+
+  const result = await runAiTask({
     task: AI_TASKS.EXTRACT_BANK_STATEMENT,
     input: { documentText },
     systemPrompt: EXTRACTION_SYSTEM_PROMPT,
-    responseSchema: AI_BANK_STATEMENT_EXTRACTION_RESPONSE_SCHEMA,
-    validateData: validateAiBankStatementExtractionData,
+    responseSchema: useCompactSchema
+      ? AI_BANK_STATEMENT_COMPACT_RESPONSE_SCHEMA
+      : AI_BANK_STATEMENT_EXTRACTION_RESPONSE_SCHEMA,
+    validateData: (raw) => validateAiBankStatementExtractionData(expandCompactBankStatementCandidate(raw)),
     config: resolvedConfig,
     provider,
     logger,
   });
+
+  return {
+    ...result,
+    data: expandCompactBankStatementCandidate(result.data),
+  };
 }
 
 export { EXTRACTION_SYSTEM_PROMPT as AI_BANK_STATEMENT_EXTRACTION_SYSTEM_PROMPT };

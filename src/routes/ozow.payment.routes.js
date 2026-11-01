@@ -64,36 +64,25 @@ router.post("/create-ozow-payment", authenticateUser, async (req, res) => {
       return res.status(500).json({ error: "Payment configuration error" });
     }
 
+    /*
+     * Supersede any prior uncompleted Pending/Initiated transactions for this
+     * user so switching plans or clicking Back never locks checkout for 15m.
+     * If a superseded transaction is somehow completed in another tab, the
+     * signed Ozow webhook will still honor a genuine Status='Complete' callback.
+     */
     await pool.query(
       `UPDATE ozow_transactions
-       SET status = 'Expired', processed_at = NOW(), updated_at = NOW()
+       SET status = CASE
+             WHEN created_at <= NOW() - INTERVAL '15 minutes' THEN 'Expired'
+             ELSE 'Cancelled'
+           END,
+           processed_at = NOW(),
+           updated_at = NOW()
        WHERE user_id = $1
          AND status IN ('Pending', 'Initiated')
-         AND processed_at IS NULL
-         AND created_at <= NOW() - INTERVAL '15 minutes'`,
+         AND processed_at IS NULL`,
       [user.userId]
     );
-
-    const existingPayment = await pool.query(
-      `SELECT id, transaction_reference, plan_code, created_at, status
-       FROM ozow_transactions
-       WHERE user_id = $1
-         AND status IN ('Pending', 'Initiated')
-         AND processed_at IS NULL
-         AND created_at > NOW() - INTERVAL '15 minutes'
-       ORDER BY created_at DESC
-       LIMIT 1`,
-      [user.userId]
-    );
-
-    if (existingPayment.rows.length > 0) {
-      return res.status(400).json({
-        error: "PAYMENT_ALREADY_PENDING",
-        message: "You already have a payment in progress. Please complete it first.",
-        transactionReference: existingPayment.rows[0].transaction_reference,
-        planCode: existingPayment.rows[0].plan_code,
-      });
-    }
 
     const amount = (plan.price_cents / 100).toFixed(2);
     const nowMs = Date.now();

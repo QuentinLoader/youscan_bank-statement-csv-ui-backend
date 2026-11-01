@@ -279,3 +279,85 @@ export const AI_BANK_STATEMENT_EXTRACTION_LIMITS = Object.freeze({
   maxEvidenceItems: MAX_EVIDENCE_ITEMS,
   maxEvidenceChars: MAX_EVIDENCE_CHARS,
 });
+
+export const AI_BANK_STATEMENT_COMPACT_RESPONSE_SCHEMA = Object.freeze({
+  type: "object",
+  properties: {
+    bankName: STRING_FIELD_SCHEMA,
+    accountNumber: NULLABLE_STRING_FIELD_SCHEMA,
+    clientName: NULLABLE_STRING_FIELD_SCHEMA,
+    statementPeriodStart: NULLABLE_STRING_FIELD_SCHEMA,
+    statementPeriodEnd: NULLABLE_STRING_FIELD_SCHEMA,
+    openingBalance: NULLABLE_NUMBER_FIELD_SCHEMA,
+    closingBalance: NULLABLE_NUMBER_FIELD_SCHEMA,
+    transactionCount: {
+      type: "integer",
+      description: "Number of returned transaction-table rows across all pages, including zero-amount rows; must equal transactions.length.",
+      minimum: 0,
+      maximum: MAX_TRANSACTIONS,
+    },
+    transactions: {
+      type: "array",
+      maxItems: MAX_TRANSACTIONS,
+      items: {
+        type: "object",
+        properties: {
+          date: { type: ["string", "null"] },
+          description: { type: "string" },
+          amount: { type: "number" },
+          fee: { type: ["number", "null"] },
+          balance: { type: ["number", "null"] },
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+          evidence: {
+            type: "array",
+            items: { type: "string", minLength: 1, maxLength: MAX_EVIDENCE_CHARS },
+            maxItems: MAX_EVIDENCE_ITEMS,
+          },
+        },
+        required: ["date", "description", "amount", "fee", "balance", "confidence", "evidence"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: [
+    "bankName",
+    "accountNumber",
+    "clientName",
+    "statementPeriodStart",
+    "statementPeriodEnd",
+    "openingBalance",
+    "closingBalance",
+    "transactionCount",
+    "transactions",
+  ],
+  additionalProperties: false,
+});
+
+export function expandCompactBankStatementCandidate(data) {
+  if (!isPlainObject(data) || !Array.isArray(data.transactions)) return data;
+  const isCompact = data.transactions.some(
+    (row) => isPlainObject(row) && typeof row.confidence === "number" && !isPlainObject(row.amount)
+  );
+  if (!isCompact) return data;
+
+  return {
+    ...data,
+    transactions: data.transactions.map((row) => {
+      if (!isPlainObject(row) || isPlainObject(row.amount)) return row;
+      const confidence = typeof row.confidence === "number" ? row.confidence : 0.99;
+      const evidence = Array.isArray(row.evidence) ? row.evidence : [];
+      const wrap = (val) => ({
+        value: val ?? null,
+        confidence,
+        evidence: val === null || val === undefined ? [] : evidence,
+      });
+      return {
+        date: wrap(row.date),
+        description: wrap(row.description),
+        amount: wrap(row.amount),
+        fee: wrap(row.fee),
+        balance: wrap(row.balance),
+      };
+    }),
+  };
+}
