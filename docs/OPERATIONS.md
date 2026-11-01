@@ -13,6 +13,7 @@
 | `YOUSCAN_V2_AI_TIMEOUT_MS` | Task deadline; PDF reading is capped at two minutes |
 | `YOUSCAN_V2_AI_MAX_INPUT_CHARS` | Structured-extraction input limit; default 120000 |
 | `YOUSCAN_V2_AI_EXTRACTION_MIN_CONFIDENCE`, `YOUSCAN_V2_AI_EXTRACTION_FIELD_MIN_CONFIDENCE` | Existing thresholds; default 0.95; do not lower just to suppress review |
+| `YOUSCAN_V2_COMPACT_SCHEMA_ENABLED`, `YOUSCAN_V2_NATIVE_FAST_PATH_ENABLED` | Optional extraction optimizations (compact row-level schema and native PDF text fast-path with automatic Vision fallback) |
 | `APP_URL`, `RESEND_API_KEY` | Email verification and password reset |
 | `OZOW_SITE_CODE`, `OZOW_PRIVATE_KEY`, `OZOW_ALLOW_TEST_PAYMENTS` | Existing payment/webhook settings |
 | `YOUSCAN_ADMIN_EMAILS` | Existing server-side administration allowlist |
@@ -25,7 +26,7 @@ The retired classifier flag does not control current AI extraction and is not re
 
 ## Release
 
-Both repositories use `main`. Push tested commits; configure Railway backend source to `QuentinLoader/youscan_bank-statement-csv-ui-backend`, branch `main`. Frontend source is `QuentinLoader/youscan-finance-frontend`, branch `main`; production publishing is through the existing Lovable project, with custom domain `youscan.addvision.co.za`.
+Both repositories use `main`. Push tested commits; configure Railway backend source to `QuentinLoader/youscan_bank-statement-csv-ui-backend`, branch `main`. Frontend source is `QuentinLoader/youscan-finance-frontend`, branch `main`; production publishing is on Vercel (`youscan-frontend`) with custom domain `youscan.addvision.co.za`.
 
 Railway pre-deploy runs `node scripts/migrate-operations.js` on each release. It creates the operational tables idempotently and verifies dashboard queries before new code starts. A failed migration stops the release; do not drop the tables during rollback. For local database setup, run this command before using Admin operations.
 

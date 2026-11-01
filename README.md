@@ -12,7 +12,7 @@ Authenticated availability check → upload → AI PDF page reading → AI struc
 
 All statement fields originate from AI extraction. Validation checks consistency without inventing balances, amounts, fees or transactions. An explicit customer edit is retained as a human correction. Failed AI never produces a completed statement or invokes another extractor.
 
-The supported bank registry covers ABSA, FNB, Capitec, Standard Bank, Nedbank and Discovery Bank. Support is a routing contract, not a guarantee that every layout has passed current live accuracy testing.
+The supported bank registry covers ABSA, FNB, Capitec, Standard Bank, Nedbank, Discovery Bank, Investec, TymeBank, African Bank, Sasfin, Bank Zero and Bidvest Bank. Support is a routing contract, not a guarantee that every layout has passed current live accuracy testing.
 
 ## APIs
 
@@ -63,7 +63,7 @@ The encrypted review/audit compatibility layer retains historical proposal struc
 
 Admin opens separately from scanning. Safe structured failure records and support-resolution history live in Railway Postgres and survive backend restarts. Records begin at the Admin rollout; previous errors are not imported. The default 90-day operational policy is enforced by a protected cleanup endpoint called manually or by an external scheduler, not an automatic TTL. Payment/export/account history is separate.
 
-GitHub holds source, Railway runs the backend and database, and Lovable currently hosts the frontend. Vercel frontend configuration is prepared; hosting has not moved. Admin provider status reads cached availability without a new AI probe.
+GitHub holds source, Railway runs the backend and database, and Vercel (`youscan-frontend` at `https://youscan.addvision.co.za`) hosts the production frontend. Admin provider status reads cached availability without a new AI probe.
 
 ## Administrator management
 

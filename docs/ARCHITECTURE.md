@@ -24,7 +24,7 @@ Provider failures during processing immediately mark availability false. An olde
 
 | State | Customer display |
 | --- | --- |
-| Usable extraction with no unresolved action | `YouScan V2 — Processed successfully`, bank/source, `AI extraction`, extracted transaction count |
+| Usable extraction with no unresolved action | `YouScan — Processed successfully`, bank/source, `AI extraction`, extracted transaction count |
 | Unresolved customer-confirmable fields | `Review required — X fields` and `Review fields` navigation |
 | Unsafe or unusable extraction | `Unable to process reliably` and retry/support instructions |
 | Provider unavailable | `Document analysis is temporarily unavailable. Please try again later.` |

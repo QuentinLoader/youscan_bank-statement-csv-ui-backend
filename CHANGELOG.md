@@ -1,5 +1,12 @@
 # Change history
 
+## 1 November 2026 - 12-bank SA support, reverse-chronological validation, opt-in extraction optimizations & billing guards
+
+- Expanded supported South African bank registry and brand/legal aliases to 12 banks (added Investec, TymeBank, African Bank, Sasfin, Bank Zero and Bidvest Bank).
+- Added reverse-chronological statement validation so newest-first statements reconcile cleanly without false running-balance mismatches.
+- Added opt-in compact row-level AI schema (`YOUSCAN_V2_COMPACT_SCHEMA_ENABLED`) and opt-in native PDF text fast-path (`YOUSCAN_V2_NATIVE_FAST_PATH_ENABLED`) with automatic Vision fallback.
+- Preserved unlimited parses and exports for `PRO_YEAR_UNLIMITED` accounts (`creditsDeducted: 0`, `remaining: null`), added a finite-plan batch allowance guard, protected active `PRO_YEAR_UNLIMITED` accounts against webhook downgrades, and allowed retry of pending Ozow checkouts without a 15-minute lockout.
+
 ## 7 October 2026 - Administrator management
 
 Administrator-management production deployment approved on 7 October 2026. Backend/schema is released before the frontend.
