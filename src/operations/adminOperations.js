@@ -58,7 +58,7 @@ export async function operationsOverview(db) {
   const coverage = await db.query('SELECT started_at FROM processing_coverage WHERE singleton=true');
   const unresolved = await db.query("SELECT count(*)::int AS count FROM processing_attempts WHERE outcome IN ('failed','rejected') AND resolution!='resolved'");
   const billing = await db.query(`SELECT
-    (SELECT count(*)::int FROM ozow_transactions WHERE status='Complete' AND processed_at IS NOT NULL AND created_at >= now()-interval '14 days') AS confirmed_payments,
+    (SELECT count(*)::int FROM payment_transactions WHERE status='success' AND processed_at IS NOT NULL AND created_at >= now()-interval '14 days') AS confirmed_payments,
     (SELECT count(*)::int FROM users WHERE plan_code IN ('MONTHLY_25','PRO_YEAR_UNLIMITED') AND (renewal_date IS NULL OR renewal_date<=now())) AS expired_subscriptions,
     (SELECT count(*)::int FROM users WHERE plan_code IN ('MONTHLY_25','PRO_YEAR_UNLIMITED') AND renewal_date>now() AND renewal_date<=now()+interval '7 days') AS expiring_subscriptions`);
   const exports = await db.query(`SELECT count(*)::int AS first_exports,

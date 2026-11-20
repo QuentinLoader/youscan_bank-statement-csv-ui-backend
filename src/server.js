@@ -9,8 +9,8 @@ import cors from "cors";
 import rateLimit from "express-rate-limit";
 
 // Route & Webhook Imports
-import ozowWebhook from "./webhooks/ozow.webhook.js";
-import ozowPaymentRoutes from "./routes/ozow.payment.routes.js";
+import paystackWebhook from "./webhooks/paystack.webhook.js";
+import billingRoutes from "./routes/billing.routes.js";
 import authRoutes from "./routes/auth.routes.js";
 import usageRoutes from "./routes/usage.routes.js";
 import { PRICING } from "./config/pricing.js";
@@ -50,9 +50,9 @@ app.use(
 app.options("*", cors());
 
 /* =========================================
-   OZOW WEBHOOK (MUST BE BEFORE JSON PARSER)
+   PAYSTACK WEBHOOK (MUST BE BEFORE JSON PARSER)
 ========================================= */
-app.use("/ozow", ozowWebhook);
+app.use("/paystack", paystackWebhook);
 
 /* =========================================
    ADMIN ROUTE
@@ -75,8 +75,8 @@ app.use(globalLimiter);
    ROUTES
 ========================================= */
 
-// Payment Routes (Handles /billing/create-ozow-payment)
-app.use("/billing", ozowPaymentRoutes);
+// Payment Routes (Handles /billing/create-payment, /billing/status, /billing/payment-status)
+app.use("/billing", billingRoutes);
 
 // Core Logic Routes
 app.use("/auth", authRoutes);
@@ -96,10 +96,10 @@ app.get("/health/routes", (req, res) => {
     ok: true,
     routes: {
       pricing: "/pricing",
-      billingCreateOzowPayment: "/billing/create-ozow-payment",
-    billingStatus: "/billing/status",
-    billingPaymentStatus: "/billing/payment-status",
-      ozowWebhook: "/ozow/webhook",
+      billingCreatePayment: "/billing/create-payment",
+      billingStatus: "/billing/status",
+      billingPaymentStatus: "/billing/payment-status",
+      paystackWebhook: "/paystack/webhook",
       v2Parse: "/api/v2/parse",
       v2AnalysisAvailability: "/api/v2/parse/availability",
       v2Reviews: "/api/v2/reviews",

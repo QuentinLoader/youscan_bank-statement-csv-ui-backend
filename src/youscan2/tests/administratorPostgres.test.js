@@ -26,7 +26,7 @@ test('PostgreSQL migration, concurrent lockout, revocation and separate export a
       CREATE TABLE v2_export_ledger(id bigserial PRIMARY KEY,user_id integer REFERENCES users(id),job_id text,file_name text,
         plan_code text,credits_deducted integer,exported_at timestamptz DEFAULT now(),UNIQUE(user_id,job_id));
       CREATE TABLE usage_logs(id bigserial PRIMARY KEY,user_id integer REFERENCES users(id),action text,ip_address text,plan_code text,credits_deducted integer);
-      CREATE TABLE ozow_transactions(id serial PRIMARY KEY,status text,processed_at timestamptz,created_at timestamptz DEFAULT now());
+      CREATE TABLE payment_transactions(id serial PRIMARY KEY,status text,processed_at timestamptz,created_at timestamptz DEFAULT now());
       INSERT INTO users(id,email,is_verified,plan_code,credits_remaining,lifetime_parses_used,subscription_status,renewal_date) VALUES
         (1,'bootstrap@example.test',true,'FREE',0,15,'inactive',null),
         (2,'managed@example.test',true,'MONTHLY_25',7,15,'active','2000-01-01'),

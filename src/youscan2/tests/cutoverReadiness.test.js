@@ -12,8 +12,7 @@ function readyEnv() {
   return {
     DATABASE_URL: "postgresql://synthetic",
     JWT_SECRET: "synthetic-jwt",
-    OZOW_SITE_CODE: "synthetic-site",
-    OZOW_PRIVATE_KEY: "synthetic-ozow",
+    PAYSTACK_SECRET_KEY: "sk_test_synthetic_paystack",
     YOUSCAN_V2_REVIEW_PERSISTENCE_ENABLED: "true",
     YOUSCAN_V2_REVIEW_ENCRYPTION_KEY: Buffer.alloc(32, 5).toString("base64"),
     YOUSCAN_V2_AI_ENABLED: "true",
@@ -75,7 +74,7 @@ test("Batch 19 readiness report is privacy-safe and never returns secret values"
   const env = readyEnv();
   const report = await buildCutoverReadiness({ env, dbPool: tableDb() });
   const serialized = JSON.stringify(report);
-  for (const secret of [env.JWT_SECRET, env.OZOW_PRIVATE_KEY, env.OPENAI_API_KEY, env.YOUSCAN_V2_REVIEW_ENCRYPTION_KEY]) {
+  for (const secret of [env.JWT_SECRET, env.PAYSTACK_SECRET_KEY, env.OPENAI_API_KEY, env.YOUSCAN_V2_REVIEW_ENCRYPTION_KEY]) {
     assert.equal(serialized.includes(secret), false);
   }
 });

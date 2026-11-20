@@ -3,7 +3,7 @@ import { PRICING } from "../../config/pricing.js";
 const REQUIRED_TABLES = Object.freeze([
   "users",
   "usage_logs",
-  "ozow_transactions",
+  "payment_transactions",
   "youscan_v2_review_cases",
   "youscan_v2_review_audit",
 ]);
@@ -40,8 +40,7 @@ export function evaluateCutoverConfiguration(env = process.env, pricing = PRICIN
   const checks = [
     check("database_url", present(env.DATABASE_URL)),
     check("jwt_secret", present(env.JWT_SECRET)),
-    check("ozow_site_code", present(env.OZOW_SITE_CODE)),
-    check("ozow_private_key", present(env.OZOW_PRIVATE_KEY)),
+    check("paystack_secret_key", present(env.PAYSTACK_SECRET_KEY)),
     check("review_persistence_enabled", enabled(env.YOUSCAN_V2_REVIEW_PERSISTENCE_ENABLED)),
     check("review_encryption_key", validReviewKey(env.YOUSCAN_V2_REVIEW_ENCRYPTION_KEY)),
     check("ai_enabled", enabled(env.YOUSCAN_V2_AI_ENABLED)),

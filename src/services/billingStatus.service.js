@@ -53,13 +53,16 @@ export async function getPaymentConfirmation({ userId, reference, dbPool = pool 
     throw new BillingStatusError("PAYMENT_REFERENCE_REQUIRED", "A payment reference is required.", 400);
   }
   const result = await dbPool.query(
-    `SELECT plan_code, status, processed_at FROM ozow_transactions
+    `SELECT plan_code, status, processed_at FROM payment_transactions
      WHERE user_id = $1 AND transaction_reference = $2 LIMIT 1`,
     [userId, reference]
   );
   const payment = result.rows[0];
-  return { confirmed: Boolean(payment?.status === "Complete" && payment.processed_at),
-    plan_code: payment?.plan_code || null };
+  return {
+    confirmed: Boolean(payment?.status === "success" && payment.processed_at),
+    plan_code: payment?.plan_code || null,
+    status: payment?.status || null,
+  };
 }
 
 export async function getBillingStatusForUser({ userId, dbPool = pool, now = new Date(), env = process.env } = {}) {

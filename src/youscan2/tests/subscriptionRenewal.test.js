@@ -33,14 +33,14 @@ for (const plan of ["MONTHLY_25", "PRO_YEAR_UNLIMITED"]) {
 }
 
 test("payment confirmation requires an owned, completed and processed transaction", async () => {
-  for (const payment of [undefined, { status: "Pending" }, { status: "Failed" },
-    { status: "Cancelled" }, { status: "Complete", processed_at: null },
-    { status: "Complete", processed_at: now }]) {
+  for (const payment of [undefined, { status: "pending" }, { status: "failed" },
+    { status: "cancelled" }, { status: "success", processed_at: null },
+    { status: "success", processed_at: now }]) {
     const calls = [];
     const result = await getPaymentConfirmation({ userId: 42, reference: "synthetic", dbPool: {
       query: async (sql, params) => { calls.push({ sql, params }); return { rows: payment ? [{ ...payment, plan_code: "MONTHLY_25" }] : [] }; },
     } });
-    assert.equal(result.confirmed, Boolean(payment?.status === "Complete" && payment.processed_at));
+    assert.equal(result.confirmed, Boolean(payment?.status === "success" && payment.processed_at));
     assert.match(calls[0].sql, /WHERE user_id = \$1 AND transaction_reference = \$2/);
     assert.deepEqual(calls[0].params, [42, "synthetic"]);
   }

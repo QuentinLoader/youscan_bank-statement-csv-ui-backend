@@ -93,8 +93,9 @@ test("Batch 19 server-side admin authority supports configured multiple admin em
 
 test("Batch 19 frontend-required auth and billing endpoints are present in active route sources", () => {
   const auth = fs.readFileSync(new URL("../../routes/auth.routes.js", import.meta.url), "utf8");
-  const billing = fs.readFileSync(new URL("../../routes/ozow.payment.routes.js", import.meta.url), "utf8");
+  const billing = fs.readFileSync(new URL("../../routes/billing.routes.js", import.meta.url), "utf8");
   assert.equal(auth.includes('router.post("/resend-verification"'), true);
   assert.equal(auth.includes('router.post("/change-password"'), true);
   assert.equal(billing.includes('router.get("/status"'), true);
+  assert.equal(billing.includes('router.post("/create-payment"'), true);
 });

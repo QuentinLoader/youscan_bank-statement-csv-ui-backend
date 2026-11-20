@@ -146,8 +146,8 @@ export function createAdminRouter({
 
             (
               SELECT COUNT(*)::int
-              FROM ozow_transactions, boundaries b
-              WHERE status = 'Complete'
+              FROM payment_transactions, boundaries b
+              WHERE status = 'success'
                 AND processed_at IS NOT NULL
                 AND created_at >= b.last_14_start
             ) AS successful_payments_last_14_days,
